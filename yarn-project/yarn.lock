@@ -754,6 +754,7 @@ __metadata:
   dependencies:
     "@aztec/archiver": "workspace:^"
     "@aztec/bb-prover": "workspace:^"
+    "@aztec/bb.js": "workspace:^"
     "@aztec/blob-client": "workspace:^"
     "@aztec/blob-lib": "workspace:^"
     "@aztec/constants": "workspace:^"
@@ -1851,6 +1852,7 @@ __metadata:
   dependencies:
     "@aztec/archiver": "workspace:^"
     "@aztec/bb-prover": "workspace:^"
+    "@aztec/bb.js": "workspace:^"
     "@aztec/blob-client": "workspace:^"
     "@aztec/blob-lib": "workspace:^"
     "@aztec/constants": "workspace:^"
@@ -2219,6 +2221,7 @@ __metadata:
   resolution: "@aztec/validator-client@workspace:validator-client"
   dependencies:
     "@aztec/archiver": "workspace:^"
+    "@aztec/bb.js": "workspace:^"
     "@aztec/blob-client": "workspace:^"
     "@aztec/blob-lib": "workspace:^"
     "@aztec/constants": "workspace:^"
@@ -2337,7 +2340,6 @@ __metadata:
     "@aztec/constants": "workspace:^"
     "@aztec/foundation": "workspace:^"
     "@aztec/kv-store": "workspace:^"
-    "@aztec/native": "workspace:^"
     "@aztec/protocol-contracts": "workspace:^"
     "@aztec/stdlib": "workspace:^"
     "@aztec/telemetry-client": "workspace:^"
