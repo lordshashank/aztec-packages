@@ -249,7 +249,10 @@ export class CdbIpcServer {
         const { db, timestamp } = this.getFork(forkId);
         const address = AztecAddress.fromBuffer(payload.address);
         const instance = await db.getContractInstance(address, timestamp);
-        return ['CdbGetContractInstanceResponse', { instance: instance ? serializeContractInstance(instance) : null }];
+        return [
+          'CdbGetContractInstanceResponse',
+          { instance: instance ? encoder.encode(serializeContractInstance(instance)) : null },
+        ];
       }
 
       case 'CdbGetContractClass': {
@@ -258,7 +261,7 @@ export class CdbIpcServer {
         const contractClass = await db.getContractClass(classId);
         return [
           'CdbGetContractClassResponse',
-          { contractClass: contractClass ? serializeContractClass(contractClass) : null },
+          { contractClass: contractClass ? encoder.encode(serializeContractClass(contractClass)) : null },
         ];
       }
 
@@ -280,7 +283,9 @@ export class CdbIpcServer {
 
       case 'CdbAddContracts': {
         const { db } = this.getFork(forkId);
-        const contractDeploymentData = ContractDeploymentData.fromPlainObject(payload.contractDeploymentData);
+        const contractDeploymentData = ContractDeploymentData.fromPlainObject(
+          decoder.decode(payload.contractDeploymentData),
+        );
         db.addContractsFromLogs(contractDeploymentData);
         return ['CdbAddContractsResponse', {}];
       }
