@@ -121,7 +121,6 @@ import {
   InboxLeaf,
   type L1ToL2MessageSource,
   type L2ToL1MembershipWitness,
-  appendL1ToL2MessagesToTree,
 } from '@aztec/stdlib/messaging';
 import type { Offense } from '@aztec/stdlib/slashing';
 import { MIN_EXECUTION_TIME } from '@aztec/stdlib/timetable';
