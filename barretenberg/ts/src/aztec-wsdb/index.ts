@@ -12,13 +12,14 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { IMsgpackBackendAsync } from '../bb_backends/interface.js';
+import { findWsdbBinary } from '../bb_backends/node/platform.js';
 import { threadId } from 'worker_threads';
 
 let instanceCounter = 0;
 
 export interface WsdbOptions {
-  /** Path to the aztec-wsdb binary */
-  binaryPath: string;
+  /** Custom path to the aztec-wsdb binary (overrides automatic detection). */
+  wsdbPath?: string;
   /** Data directory for LMDB stores */
   dataDir: string;
   /** Tree heights map: { treeId: height } */
@@ -107,6 +108,11 @@ export class WsdbBackend implements IMsgpackBackendAsync {
   private processExitPromise: Promise<void>;
 
   constructor(options: WsdbOptions) {
+    const binaryPath = findWsdbBinary(options.wsdbPath);
+    if (!binaryPath) {
+      throw new Error('aztec-wsdb binary not found');
+    }
+
     this.useShm = options.useShm ?? false;
     const instanceId = `wsdb-${process.pid}-${threadId}-${instanceCounter++}`;
 
@@ -140,7 +146,7 @@ export class WsdbBackend implements IMsgpackBackendAsync {
       args.push('--response-ring-size', `${1024 * 1024 * 4}`);
     }
 
-    this.process = spawn(options.binaryPath, args, {
+    this.process = spawn(binaryPath, args, {
       stdio: ['ignore', options.logger ? 'pipe' : 'ignore', options.logger ? 'pipe' : 'ignore'],
       env,
     });
@@ -172,6 +178,12 @@ export class WsdbBackend implements IMsgpackBackendAsync {
     } else {
       this.connectUdsPoll(connectionResolve!, connectionReject!);
     }
+  }
+
+  static async new(options: WsdbOptions): Promise<WsdbBackend> {
+    const backend = new WsdbBackend(options);
+    await backend.waitUntilReady();
+    return backend;
   }
 
   /** Returns the IPC path for the running wsdb server (for other IPC clients to connect). */
