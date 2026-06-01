@@ -243,15 +243,18 @@ export class EpochProvingJob implements Traceable {
             collectPublicInputs: true,
             collectStatistics: false,
           });
-          const publicProcessor = this.publicProcessorFactory.create(db, globalVariables, config);
-          const processed = await this.processTxs(publicProcessor, txs);
-          await this.prover.addTxs(processed);
           try {
-            this.publicProcessorFactory.unregisterFork(db.getRevision().forkId);
-          } catch {
-            // Fork may not have a revision (e.g., in tests with mocked DBs)
+            const publicProcessor = this.publicProcessorFactory.create(db, globalVariables, config);
+            const processed = await this.processTxs(publicProcessor, txs);
+            await this.prover.addTxs(processed);
+          } finally {
+            try {
+              this.publicProcessorFactory.unregisterFork(db.getRevision().forkId);
+            } catch {
+              // Fork may not have a revision (e.g., in tests with mocked DBs)
+            }
+            await db.close();
           }
-          await db.close();
           this.log.verbose(`Processed all ${txs.length} txs for block ${block.number}`, {
             blockNumber: block.number,
             blockHash: (await block.hash()).toString(),
