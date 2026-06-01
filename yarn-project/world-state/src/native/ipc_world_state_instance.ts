@@ -24,7 +24,6 @@ import { MerkleTreeId } from '@aztec/stdlib/trees';
 import type { GenesisData, WorldStateRevision } from '@aztec/stdlib/world-state';
 
 import assert from 'assert';
-import { Decoder } from 'msgpackr';
 
 import type { WorldStateInstrumentation } from '../instrumentation/instrumentation.js';
 import type { WorldStateTreeMapSizes } from '../synchronizer/factory.js';
@@ -47,10 +46,6 @@ import {
 } from './message.js';
 import type { NativeWorldStateInstance } from './native_world_state_instance.js';
 import { WorldStateOpsQueue } from './world_state_ops_queue.js';
-
-// ————— Msgpack helpers —————
-
-const msgpackDecoder = new Decoder({ useRecords: false });
 
 // ————— Request conversion helpers —————
 
@@ -170,12 +165,6 @@ function convertUint8ArraysToBuffers(obj: unknown): unknown {
     return result;
   }
   return obj;
-}
-
-/** Decode a msgpack-encoded leaf value blob and convert Uint8Arrays to Buffers. */
-function decodeLeafValue(encoded: Uint8Array): SerializedLeafValue {
-  const decoded = msgpackDecoder.unpack(Buffer.from(encoded));
-  return convertUint8ArraysToBuffers(decoded) as SerializedLeafValue;
 }
 
 /** Convert Wsdb state reference (Record<number, [Uint8Array, number]>) to NAPI format. */
@@ -482,7 +471,7 @@ export class IpcWorldState implements NativeWorldStateInstance {
         if (!resp.value) {
           return undefined as WorldStateResponse[T];
         }
-        return decodeLeafValue(resp.value) as WorldStateResponse[T];
+        return Buffer.from(resp.value) as WorldStateResponse[T];
       }
 
       case WorldStateMessageType.GET_LEAF_PREIMAGE: {
