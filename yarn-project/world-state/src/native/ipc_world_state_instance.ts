@@ -463,11 +463,20 @@ export class IpcWorldState implements NativeWorldStateInstance {
 
       case WorldStateMessageType.GET_LEAF_VALUE: {
         const b = body as WorldStateRequest[WorldStateMessageType.GET_LEAF_VALUE];
-        const resp = await this.api.wsdbGetLeafValue({
-          treeId: b.treeId,
-          revision: toWsdbRevision(b.revision),
-          leafIndex: Number(b.leafIndex),
-        });
+        const revision = toWsdbRevision(b.revision);
+        const leafIndex = Number(b.leafIndex);
+
+        if (b.treeId === MerkleTreeId.PUBLIC_DATA_TREE) {
+          const resp = await this.api.wsdbGetPublicDataLeafValue({ revision, leafIndex });
+          return (resp.value ? fromPublicDataLeaf(resp.value) : undefined) as WorldStateResponse[T];
+        }
+
+        if (b.treeId === MerkleTreeId.NULLIFIER_TREE) {
+          const resp = await this.api.wsdbGetNullifierLeafValue({ revision, leafIndex });
+          return (resp.value ? fromNullifierLeaf(resp.value) : undefined) as WorldStateResponse[T];
+        }
+
+        const resp = await this.api.wsdbGetLeafValue({ treeId: b.treeId, revision, leafIndex });
         if (!resp.value) {
           return undefined as WorldStateResponse[T];
         }
