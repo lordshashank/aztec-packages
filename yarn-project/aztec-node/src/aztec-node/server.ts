@@ -609,12 +609,6 @@ export class AztecNodeService implements AztecNode, AztecNodeAdmin, AztecNodeDeb
 
     // Set up IPC backends for world state and AVM simulation.
     const { WsdbBackend } = await import('@aztec/bb.js/aztec-wsdb');
-    const { findWsdbBinary } = await import('@aztec/bb.js/platform');
-
-    const wsdbBinaryPath = findWsdbBinary();
-    if (!wsdbBinaryPath) {
-      throw new Error('aztec-wsdb binary not found');
-    }
 
     const configuredDataDir = config.worldStateDataDirectory ?? config.dataDirectory;
     const dataDirectory = configuredDataDir ?? (await mkdtemp(join(tmpdir(), 'aztec-world-state-')));
@@ -631,10 +625,9 @@ export class AztecNodeService implements AztecNode, AztecNodeAdmin, AztecNodeDeb
       d => [d.slot.toBuffer(), d.value.toBuffer()] as [Buffer, Buffer],
     );
 
-    log.info('Starting IPC backends', { wsdbBinary: wsdbBinaryPath, dataDir: dataDirectory });
+    log.info('Starting IPC backends', { dataDir: dataDirectory });
 
-    const wsdbBackend = new WsdbBackend({
-      binaryPath: wsdbBinaryPath,
+    const wsdbBackend = await WsdbBackend.new({
       dataDir: join(dataDirectory, 'world_state'),
       ...wsdbOpts,
       prefilledPublicData: prefilledData,
@@ -644,9 +637,6 @@ export class AztecNodeService implements AztecNode, AztecNodeAdmin, AztecNodeDeb
     });
 
     const cdbServer = new CdbIpcServer();
-
-    log.info('Waiting for WSDB backend to be ready...');
-    await wsdbBackend.waitUntilReady();
 
     log.info('WSDB ready, creating AVM simulator pool');
     const avmPool = await AvmSimulatorPool.spawn({
@@ -659,15 +649,13 @@ export class AztecNodeService implements AztecNode, AztecNodeAdmin, AztecNodeDeb
     const recreateIpcInstance = async () => {
       await rm(wsdbDir, { recursive: true, force: true, maxRetries: 3 });
       await mkdir(wsdbDir, { recursive: true });
-      const freshBackend = new WsdbBackend({
-        binaryPath: wsdbBinaryPath,
+      const freshBackend = await WsdbBackend.new({
         dataDir: wsdbDir,
         ...wsdbOpts,
         prefilledPublicData: prefilledData,
         logger: (msg: string) => log.debug(msg),
         useShm: false,
       });
-      await freshBackend.waitUntilReady();
       return new IpcWorldState(freshBackend, new WorldStateInstrumentation(telemetry));
     };
 
