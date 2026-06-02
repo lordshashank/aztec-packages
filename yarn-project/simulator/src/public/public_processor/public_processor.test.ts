@@ -17,8 +17,8 @@ import { type MerkleTreeWriteOperations, PublicDataTreeLeaf, PublicDataTreeLeafP
 import { GlobalVariables, StateReference, Tx, type TxValidator } from '@aztec/stdlib/tx';
 import { getTelemetryClient } from '@aztec/telemetry-client';
 
+import { jest } from '@jest/globals';
 import { strict as assert } from 'assert';
-import { fn } from 'jest-mock';
 import { type MockProxy, mock } from 'jest-mock-extended';
 
 import { PublicContractsDB } from '../public_db_sources.js';
@@ -256,7 +256,7 @@ describe('public_processor', () => {
         finishSimulation = resolve;
       });
 
-      const cancel = fn(() => {
+      const cancel = jest.fn(() => {
         finishSimulation();
         return Promise.resolve();
       });
