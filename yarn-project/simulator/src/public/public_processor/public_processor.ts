@@ -346,9 +346,11 @@ export class PublicProcessor implements Traceable {
         // Commit the tx-level contracts checkpoint on success
         this.contractsDB.commitCheckpoint();
       } catch (err: any) {
-        if (err?.name === 'PublicProcessorTimeoutError') {
-          this.log.warn(`Stopping tx processing due to timeout.`);
-          // We hit the transaction execution deadline.
+        if (err?.name === 'PublicProcessorTimeoutError' || err?.name === 'PublicProcessorAbortError') {
+          this.log.warn(
+            `Stopping tx processing due to ${err.name === 'PublicProcessorTimeoutError' ? 'timeout' : 'abort'}.`,
+          );
+          // We hit the transaction execution deadline or an external abort signal.
           // There may still be a transaction executing on a worker thread (C++ via NAPI).
           // Signal cancellation AND WAIT for the simulation to actually stop.
           // This is critical because C++ might be in the middle of a slow operation (e.g., pad_trees)

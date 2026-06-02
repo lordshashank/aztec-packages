@@ -18,6 +18,7 @@ import { GlobalVariables, StateReference, Tx, type TxValidator } from '@aztec/st
 import { getTelemetryClient } from '@aztec/telemetry-client';
 
 import { strict as assert } from 'assert';
+import { fn } from 'jest-mock';
 import { type MockProxy, mock } from 'jest-mock-extended';
 
 import { PublicContractsDB } from '../public_db_sources.js';
@@ -255,7 +256,7 @@ describe('public_processor', () => {
         finishSimulation = resolve;
       });
 
-      const cancel = jest.fn(() => {
+      const cancel = fn(() => {
         finishSimulation();
         return Promise.resolve();
       });
