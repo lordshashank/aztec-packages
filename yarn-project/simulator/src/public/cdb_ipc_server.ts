@@ -34,7 +34,7 @@ function toFieldBuffer(field: Fr | AztecAddress): Buffer {
  * Serialize a ContractInstanceWithAddress to the format expected by the C++ CDB client.
  * Matches the avm2::ContractInstance msgpack schema.
  */
-function serializeContractInstance(instance: ContractInstanceWithAddress): Record<string, unknown> {
+export function serializeContractInstance(instance: ContractInstanceWithAddress): Record<string, unknown> {
   return {
     salt: toFieldBuffer(instance.salt),
     deployer: toFieldBuffer(instance.deployer),
@@ -50,6 +50,8 @@ function serializeContractInstance(instance: ContractInstanceWithAddress): Recor
       },
       ovpkMHash: toFieldBuffer(instance.publicKeys.ovpkMHash),
       tpkMHash: toFieldBuffer(instance.publicKeys.tpkMHash),
+      mspkMHash: toFieldBuffer(instance.publicKeys.mspkMHash),
+      fbpkMHash: toFieldBuffer(instance.publicKeys.fbpkMHash),
     },
   };
 }
