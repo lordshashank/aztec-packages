@@ -148,7 +148,7 @@ export class NativeWorldStateService implements MerkleTreeDatabase {
     return worldState;
   }
 
-  static async ephemeral(
+  static ephemeral(
     genesis: GenesisData = EMPTY_GENESIS_DATA,
     instrumentation = new WorldStateInstrumentation(getTelemetryClient()),
     bindings?: LoggerBindings,
