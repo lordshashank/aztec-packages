@@ -1,3 +1,5 @@
+pub mod constrained_delivery;
+
 use crate::{
     context::PrivateContext,
     messages::{
