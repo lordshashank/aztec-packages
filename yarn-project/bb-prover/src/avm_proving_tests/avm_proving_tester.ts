@@ -84,6 +84,14 @@ export class AvmProvingTester extends PublicTxSimulationTester {
     return tester;
   }
 
+  public override async close(): Promise<void> {
+    const results = await Promise.allSettled([super.close(), this.bbJsFactory.destroy()]);
+    const errors = results.flatMap(result => (result.status === 'rejected' ? [result.reason] : []));
+    if (errors.length > 0) {
+      throw new AggregateError(errors, `Failed to close AVM proving tester`);
+    }
+  }
+
   /**
    * Generate an AVM proof (or run check-circuit if configured). Records per-stage timings in the test metrics.
    * Returns the in-memory proof fields on success; throws via jest expect() on failure.

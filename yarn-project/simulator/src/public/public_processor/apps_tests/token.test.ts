@@ -105,6 +105,7 @@ describe.each([
     }
     avmBackend = undefined;
     cdbServer = undefined;
+    await tester.close();
     await worldStateService.close();
   });
 

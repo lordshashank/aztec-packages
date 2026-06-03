@@ -110,6 +110,7 @@ describe('Public TX simulator apps tests: benchmarks', () => {
         }
         avmBackend = undefined;
         cdbServer = undefined;
+        await tester.close();
         await worldStateService.close();
       });
 
@@ -273,6 +274,7 @@ describe('Public TX simulator apps tests: benchmarks', () => {
         }
         avmBackend = undefined;
         cdbServer = undefined;
+        await tester.close();
         await worldStateService.close();
       });
 
