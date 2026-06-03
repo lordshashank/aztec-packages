@@ -200,3 +200,96 @@ unconstrained fn distinct_pairs_have_independent_indexes() {
     assert_eq(index_b, 0);
     assert(secret_a != secret_b, "different recipients should yield distinct siloed secrets");
 }
+
+// After high-level constrained note delivery lands a tagged log and the chain nullifier in a block, the per-secret
+// index advances in the PXE. The next resolution takes the `index > 0` branch, which proves the prior (now settled)
+// nullifier exists via `compute_nullifier_existence_request`, and returns index 1.
+#[test]
+unconstrained fn advances_index_above_zero_when_prior_message_was_emitted() {
+    let (env, registry_address, test_address, sender, recipient) = setup();
+    let test_contract = ConstrainedDeliveryTest::at(test_address);
+
+    // tx1: bootstraps the handshake (index 0), emits the chain nullifier and the constrained log.
+    env.call_private_opts(
+        sender,
+        helper_options(registry_address),
+        test_contract.emit(registry_address, sender, recipient),
+    );
+
+    // tx2: the emitted log advanced the per-secret index, so resolution returns index 1 and proves the now-settled
+    // predecessor nullifier.
+    let (_secret, index) = env.call_private_opts(
+        sender,
+        helper_options(registry_address),
+        test_contract.calculate_and_return(registry_address, sender, recipient),
+    );
+
+    assert_eq(index, 1);
+}
+
+#[test]
+unconstrained fn maybe_note_delivery_advances_index_above_zero() {
+    let (env, registry_address, test_address, sender, recipient) = setup();
+    let test_contract = ConstrainedDeliveryTest::at(test_address);
+
+    env.call_private_opts(
+        sender,
+        helper_options(registry_address),
+        test_contract.emit_maybe_note(registry_address, sender, recipient),
+    );
+
+    let (_secret, index) = env.call_private_opts(
+        sender,
+        helper_options(registry_address),
+        test_contract.calculate_and_return(registry_address, sender, recipient),
+    );
+
+    assert_eq(index, 1);
+}
+
+#[test]
+unconstrained fn event_delivery_advances_index_above_zero() {
+    let (env, registry_address, test_address, sender, recipient) = setup();
+    let test_contract = ConstrainedDeliveryTest::at(test_address);
+
+    env.call_private_opts(
+        sender,
+        helper_options(registry_address),
+        test_contract.emit_event(registry_address, sender, recipient),
+    );
+
+    let (_secret, index) = env.call_private_opts(
+        sender,
+        helper_options(registry_address),
+        test_contract.calculate_and_return(registry_address, sender, recipient),
+    );
+
+    assert_eq(index, 1);
+}
+
+// Without a prior chain nullifier the `index > 0` branch cannot prove its predecessor. We advance the per-secret
+// index by landing a constrained-tagged log at index 0 without the nullifier, then a resolution at an index above 0
+// fails because a preceding nullifier is neither pending nor settled.
+#[test(should_fail_with = "reading an unknown nullifier")]
+unconstrained fn fails_at_index_above_zero_without_prior_nullifier() {
+    let (env, registry_address, test_address, sender, recipient) = setup();
+    let test_contract = ConstrainedDeliveryTest::at(test_address);
+    let registry = HandshakeRegistry::at(registry_address);
+
+    // Establish a handshake so resolution takes the `Some(secret)` branch. This emits no constrained nullifier.
+    let _ = env.call_private(sender, registry.non_interactive_handshake(sender, recipient, ONCHAIN_CONSTRAINED));
+    let secret = env
+        .execute_utility(registry.get_app_siloed_secret(sender, recipient, ONCHAIN_CONSTRAINED, test_address))
+        .expect(f"handshake should be siloed for the test contract");
+
+    // Advance the per-secret index above 0 by landing a constrained-tagged log at index 0, deliberately skipping the
+    // chain nullifier.
+    env.call_private(sender, test_contract.emit_constrained_log_without_nullifier(secret, 0));
+
+    // Resolution now takes the `index > 0` branch and fails: the predecessor nullifier was never emitted.
+    let _ = env.call_private_opts(
+        sender,
+        helper_options(registry_address),
+        test_contract.calculate_and_return(registry_address, sender, recipient),
+    );
+}

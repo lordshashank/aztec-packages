@@ -363,12 +363,12 @@ where
         deliver_offchain_message(ciphertext, recipient);
     } else {
         let log_tag = if is_constrained {
-            // TODO(#14565): constrained tagging is not yet wired up. The handshake origin and sender are validated,
-            // but the tag is mocked with the unconstrained derivation so the builder API can land before the
-            // constrained helpers; the real handshake-derived tag and chain nullifier arrive with the emit helper.
-            let _ = delivery.sender_override.expect(f"constrained delivery requires a sender (use .with_sender())");
-            let discovery_tag = compute_discovery_tag(recipient, delivery.sender_override);
-            compute_log_tag(discovery_tag, DOM_SEP__UNCONSTRAINED_MSG_LOG_TAG)
+            // Constrained + handshake origin (asserted above): resolve the handshake secret, emit the per-send chain
+            // nullifier, and derive the constrained discovery tag.
+            let registry = origin.handshake_registry.unwrap();
+            let sender =
+                delivery.sender_override.expect(f"constrained delivery requires a sender (use .with_sender())");
+            constrained_delivery::emit_nullifier_and_compute_constrained_tag(context, registry, sender, recipient)
         } else {
             // Unconstrained + address-pair origin: the discovery tag comes from the wallet-driven directional
             // tagging secret.
