@@ -13,9 +13,9 @@ use crate::protocol::{
     traits::{Deserialize, ToField},
 };
 
-// The handshake registry contract cannot be imported here (it depends on aztec-nr), so the signatures of the
-// functions the helper calls are pinned as selector constants. The registry's test suite asserts these match its
-// macro-generated interface, turning a signature change on either side into a test failure instead of silent drift.
+// The helper cannot import the handshake registry interface because the registry contract depends on aztec-nr. These
+// selector constants pin the registry ABI surface this library calls. The registry's test suite compares them against
+// its macro-generated `HandshakeRegistry::at(...).method(...).selector` values so signature drift fails in tests.
 pub global GET_APP_SILOED_SECRET_SELECTOR: FunctionSelector =
     comptime { FunctionSelector::from_signature("get_app_siloed_secret((Field),(Field),(u8),(Field))") };
 pub global NON_INTERACTIVE_HANDSHAKE_SELECTOR: FunctionSelector =

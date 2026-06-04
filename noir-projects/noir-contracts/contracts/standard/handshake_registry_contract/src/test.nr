@@ -47,9 +47,9 @@ unconstrained fn setup_with_two_recipients() -> (TestEnvironment, AztecAddress, 
     (env, registry_address, sender, recipient_a, recipient_b)
 }
 
-// `calculate_secret_and_index` in aztec-nr cannot import this contract (the contract depends on aztec-nr), so it
-// pins the signatures of the registry functions it calls as selector constants. Assert they match the
-// macro-generated interface so a signature change on either side fails here instead of silently drifting.
+// `calculate_secret_and_index` in aztec-nr cannot import this contract because the contract depends on aztec-nr. Assert
+// its selector constants match this contract's macro-generated interface so a signature change on either side fails
+// here instead of silently drifting.
 #[test]
 unconstrained fn selectors_match_the_constrained_delivery_helper() {
     let registry = HandshakeRegistry::at(AztecAddress::from_field(1));
