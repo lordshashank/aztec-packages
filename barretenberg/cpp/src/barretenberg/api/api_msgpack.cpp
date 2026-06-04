@@ -12,6 +12,7 @@
 
 #if !defined(__wasm__) && !defined(_WIN32)
 #include "ipc_runtime/ipc_server.hpp"
+#include "ipc_runtime/serve_helper.hpp"
 #include "ipc_runtime/signal_handlers.hpp"
 #endif
 
@@ -119,23 +120,18 @@ int execute_msgpack_run(const std::string& msgpack_input_file,
                         [[maybe_unused]] size_t response_ring_size)
 {
 #if !defined(__wasm__) && !defined(_WIN32)
-    // Check if this is a shared memory path (ends with .shm)
-    if (!msgpack_input_file.empty() && msgpack_input_file.size() >= 4 &&
-        msgpack_input_file.substr(msgpack_input_file.size() - 4) == ".shm") {
-        // Strip .shm suffix to get base name
-        std::string base_name = msgpack_input_file.substr(0, msgpack_input_file.size() - 4);
-        auto server = ipc::IpcServer::create_shm(base_name, request_ring_size, response_ring_size);
-        std::cerr << "Shared memory server at " << base_name << '\n';
-        return execute_msgpack_ipc_server(std::move(server));
-    }
-
-    // Check if this is a Unix domain socket path (ends with .sock)
-    if (!msgpack_input_file.empty() && msgpack_input_file.size() >= 5 &&
-        msgpack_input_file.substr(msgpack_input_file.size() - 5) == ".sock") {
-        // Socket server still supports max_clients (multiple clients via MPSC)
-        auto server = ipc::IpcServer::create_socket(msgpack_input_file, max_clients);
-        std::cerr << "Socket server at " << msgpack_input_file << '\n';
-        return execute_msgpack_ipc_server(std::move(server));
+    if (!msgpack_input_file.empty()) {
+        ipc::ServerOptions opts{
+            .max_shm_clients = static_cast<size_t>(max_clients),
+            .shm_request_ring_size = request_ring_size,
+            .shm_response_ring_size = response_ring_size,
+            .socket_backlog = max_clients,
+        };
+        auto server = ipc::make_server(msgpack_input_file, opts);
+        if (server) {
+            std::cerr << "IPC server at " << msgpack_input_file << '\n';
+            return execute_msgpack_ipc_server(std::move(server));
+        }
     }
 #endif
 
