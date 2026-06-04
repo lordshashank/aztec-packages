@@ -7,13 +7,14 @@
 use crate::ConstrainedDeliveryTest;
 
 use aztec::{
-    messages::delivery::OnchainDeliveryMode,
+    messages::delivery::{MessageDelivery, OnchainDeliveryMode},
     protocol::address::AztecAddress,
     test::helpers::test_environment::{CallPrivateOptions, TestEnvironment},
 };
 use handshake_registry_contract::HandshakeRegistry;
 
-global ONCHAIN_CONSTRAINED: OnchainDeliveryMode = OnchainDeliveryMode::onchain_constrained();
+// Modes have no public constructors, so the tests derive them through the delivery builder API.
+global ONCHAIN_CONSTRAINED: OnchainDeliveryMode = MessageDelivery::onchain_constrained().mode();
 
 unconstrained fn setup() -> (TestEnvironment, AztecAddress, AztecAddress, AztecAddress, AztecAddress) {
     let mut env = TestEnvironment::new();

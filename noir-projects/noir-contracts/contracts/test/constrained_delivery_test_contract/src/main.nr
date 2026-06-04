@@ -7,9 +7,9 @@ mod test;
 pub contract ConstrainedDeliveryTest {
     use aztec::{
         macros::functions::external,
-        messages::delivery::{constrained_delivery::calculate_secret_and_index, OnchainDeliveryMode},
+        messages::delivery::{constrained_delivery::calculate_secret_and_index, MessageDelivery},
         oracle::notes::get_next_tagging_index,
-        protocol::{address::AztecAddress, traits::ToField},
+        protocol::address::AztecAddress,
     };
 
     /// Calls the helper and returns the resolved `(app_siloed_secret, index)` tuple.
@@ -31,8 +31,7 @@ pub contract ConstrainedDeliveryTest {
     ) -> (Field, u32, u32) {
         let (secret, first_index) = calculate_secret_and_index(self.context, registry, sender, recipient);
         // Safety: test-only observation of the index the PXE hands out next for this secret.
-        let second_index =
-            unsafe { get_next_tagging_index(secret, OnchainDeliveryMode::onchain_constrained().to_field() as u8) };
+        let second_index = unsafe { get_next_tagging_index(secret, MessageDelivery::onchain_constrained().mode()) };
         (secret, first_index, second_index)
     }
 }

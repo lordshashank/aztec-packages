@@ -1,7 +1,7 @@
 //! Sender-side helpers for constrained message delivery.
 
 use crate::context::PrivateContext;
-use crate::messages::delivery::ONCHAIN_CONSTRAINED;
+use crate::messages::delivery::MessageDelivery;
 use crate::nullifier::utils::compute_nullifier_existence_request;
 use crate::oracle::{call_utility_function::call_utility_function, notes::get_next_tagging_index};
 
@@ -20,8 +20,9 @@ use crate::protocol::{
 /// oracle-supplied secret. The returned `(secret, index)` pair is the input for the caller's tag derivation
 /// and nullifier emission.
 ///
-/// All registry calls use the [`ONCHAIN_CONSTRAINED`] delivery mode: the handshake registry keys its stored notes
-/// by `(recipient, sender, mode)`, so the constrained-delivery secret must come from the constrained-mode handshake.
+/// All registry calls use the [`MessageDelivery::onchain_constrained`] delivery mode: the handshake registry keys its
+/// stored notes by `(recipient, sender, mode)`, so the constrained-delivery secret must come from the
+/// constrained-mode handshake.
 ///
 /// ## Implementation Details
 /// 1. Calls `HandshakeRegistry::get_app_siloed_secret` offchain (untrusted hint).
@@ -48,6 +49,7 @@ pub fn calculate_secret_and_index(
     recipient: AztecAddress,
 ) -> (Field, u32) {
     let caller = context.this_address();
+    let mode = MessageDelivery::onchain_constrained().mode();
 
     // Safety: the returned `Option<Field>` is untrusted and is constrained below before being returned to the
     // caller, either by performing a new handshake or by constraining the prior handshake's existence.
@@ -58,7 +60,7 @@ pub fn calculate_secret_and_index(
             registry,
             selector,
             // TODO(F-671): Replace explicit caller argument once utility context exposes msg_sender().
-            [sender.to_field(), recipient.to_field(), ONCHAIN_CONSTRAINED as Field, caller.to_field()],
+            [sender.to_field(), recipient.to_field(), mode.to_field(), caller.to_field()],
         );
         Deserialize::deserialize(returns)
     };
@@ -69,21 +71,16 @@ pub fn calculate_secret_and_index(
         // `validate_handshake` is needed.
         // TODO(F-660): dispatch to `perform_handshake(sender, recipient, handshake_type)` once interactive
         // handshakes are supported.
-        let selector =
-            comptime { FunctionSelector::from_signature("non_interactive_handshake((Field),(Field),(u8))") };
+        let selector = comptime { FunctionSelector::from_signature("non_interactive_handshake((Field),(Field),(u8))") };
         let secret: Field = context
-            .call_private_function(
-                registry,
-                selector,
-                [sender.to_field(), recipient.to_field(), ONCHAIN_CONSTRAINED as Field],
-            )
+            .call_private_function(registry, selector, [sender.to_field(), recipient.to_field(), mode.to_field()])
             .get_preimage();
 
         // Reserve index 0 for the freshly bootstrapped secret so the PXE seeds its per-secret counter, mirroring
         // the `Some` branch. Without this, a later constrained message under the same secret restarts at index 0
         // and collides on `(secret, 0)`.
         // Safety: this only advances a PXE-side counter; the returned index is constrained to 0 below.
-        let index = unsafe { get_next_tagging_index(secret, ONCHAIN_CONSTRAINED) };
+        let index = unsafe { get_next_tagging_index(secret, mode) };
         assert(index == 0, "freshly bootstrapped secret must start at index 0");
         (secret, 0)
     } else {
@@ -91,7 +88,7 @@ pub fn calculate_secret_and_index(
 
         // Safety: the index is untrusted; the anchor branches below ensure the returned `(secret, index)` pair
         // is bound to a real registry handshake before it leaves the helper.
-        let index = unsafe { get_next_tagging_index(secret, ONCHAIN_CONSTRAINED) };
+        let index = unsafe { get_next_tagging_index(secret, mode) };
 
         if index == 0 {
             let selector =
@@ -99,7 +96,7 @@ pub fn calculate_secret_and_index(
             let _ = context.call_private_function(
                 registry,
                 selector,
-                [sender.to_field(), recipient.to_field(), ONCHAIN_CONSTRAINED as Field, secret],
+                [sender.to_field(), recipient.to_field(), mode.to_field(), secret],
             );
         } else {
             let prev_nullifier = poseidon2_hash_with_separator(
