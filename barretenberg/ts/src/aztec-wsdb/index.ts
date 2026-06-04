@@ -7,12 +7,11 @@
  */
 
 import { spawn, ChildProcess } from 'child_process';
-import { NapiShmAsyncClient, UdsIpcClient, createNapiShmAsyncClient } from '@aztec/ipc-runtime';
+import { UdsIpcClient, createNapiShmAsyncClient, findIpcRuntimeNapi, type NapiShmAsyncClient } from '@aztec/ipc-runtime';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { IMsgpackBackendAsync } from '../bb_backends/interface.js';
-import { findNapiBinary } from '../bb_backends/node/platform.js';
 import { threadId } from 'worker_threads';
 
 let instanceCounter = 0;
@@ -189,9 +188,9 @@ export class WsdbBackend implements IMsgpackBackendAsync {
 
   private connectShm(resolve: () => void, reject: (error: Error) => void, napiPath?: string) {
     const shmName = this.inputPath.replace(/\.shm$/, '');
-    const addonPath = findNapiBinary(napiPath);
+    const addonPath = findIpcRuntimeNapi(napiPath);
     if (!addonPath) {
-      reject(new Error('NAPI binary not found — required for shared memory mode'));
+      reject(new Error('ipc-runtime NAPI binary not found — required for shared memory mode'));
       return;
     }
 
