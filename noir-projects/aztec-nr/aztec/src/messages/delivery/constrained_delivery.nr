@@ -13,35 +13,27 @@ use crate::protocol::{
     traits::{Deserialize, ToField},
 };
 
-/// Resolves the app-siloed shared secret and next per-secret index for a constrained send.
+// The handshake registry contract cannot be imported here (it depends on aztec-nr), so the signatures of the
+// functions the helper calls are pinned as selector constants. The registry's test suite asserts these match its
+// macro-generated interface, turning a signature change on either side into a test failure instead of silent drift.
+pub global GET_APP_SILOED_SECRET_SELECTOR: FunctionSelector =
+    comptime { FunctionSelector::from_signature("get_app_siloed_secret((Field),(Field),(u8),(Field))") };
+pub global NON_INTERACTIVE_HANDSHAKE_SELECTOR: FunctionSelector =
+    comptime { FunctionSelector::from_signature("non_interactive_handshake((Field),(Field),(u8))") };
+pub global VALIDATE_HANDSHAKE_SELECTOR: FunctionSelector =
+    comptime { FunctionSelector::from_signature("validate_handshake((Field),(Field),(u8),Field)") };
+
+/// Resolves the app-siloed secret and next index for constrained sends.
 ///
 /// Wraps the registry calls needed by every constrained-delivery app: query the handshake registry for an
 /// existing app-siloed secret, bootstrap a fresh handshake if there isn't one, and constrain the
-/// oracle-supplied secret. The returned `(secret, index)` pair is the input for the caller's tag derivation
-/// and nullifier emission.
+/// oracle-supplied secret and tagging index. The returned `(secret, index)` pair is the input for the caller's
+/// tag derivation and nullifier emission: the caller is expected to emit the matching chain nullifier (see
+/// [`compute_constrained_msg_nullifier`]) alongside each constrained send so the next call can prove the chain.
 ///
 /// All registry calls use the [`MessageDelivery::onchain_constrained`] delivery mode: the handshake registry keys its
 /// stored notes by `(recipient, sender, mode)`, so the constrained-delivery secret must come from the
 /// constrained-mode handshake.
-///
-/// ## Implementation Details
-/// 1. Calls `HandshakeRegistry::get_app_siloed_secret` offchain (untrusted hint).
-/// 2. On `None`, calls `HandshakeRegistry::non_interactive_handshake(sender, recipient, mode)` to bootstrap and
-///    returns `(secret, 0)`. The constrained return value of the private call is the source of truth for the
-///    secret.
-/// 3. On `Some(secret)`, reads the per-secret index hint via
-///    [`get_next_tagging_index`](crate::oracle::notes::get_next_tagging_index) (also untrusted), then constrains:
-///    - `index == 0`: calls `HandshakeRegistry::validate_handshake` to bind the secret to the registry's
-///      current note. `PrivateMutable::get_note` inside `validate_handshake` nullifies the current handshake
-///      note and emits a fresh one, so this branch already produces a per-call nullifier on the registry
-///      note.
-///    - `index > 0`: asserts the prior nullifier
-///      `poseidon2_hash_with_separator([sender, recipient, secret, index - 1], DOM_SEP__CONSTRAINED_MSG_NULLIFIER)`
-///      exists via
-/// [`compute_nullifier_existence_request`](crate::nullifier::utils::compute_nullifier_existence_request).
-///      The chain transitively constrains back to the index-0 `validate_handshake`. The caller is expected
-///      to emit the matching nullifier alongside each constrained send so subsequent calls can prove the
-///      chain.
 pub fn calculate_secret_and_index(
     context: &mut PrivateContext,
     registry: AztecAddress,
@@ -51,14 +43,13 @@ pub fn calculate_secret_and_index(
     let caller = context.this_address();
     let mode = MessageDelivery::onchain_constrained().mode();
 
-    // Safety: the returned `Option<Field>` is untrusted and is constrained below before being returned to the
-    // caller, either by performing a new handshake or by constraining the prior handshake's existence.
+    // Safety: when the utility call returns no secret, we attempt to create a fresh handshake. Creating a
+    // duplicate fails, so a forged empty response cannot hide an existing handshake. When the utility call
+    // returns a secret, it is validated against the registry's stored handshake.
     let maybe_secret: Option<Field> = unsafe {
-        let selector =
-            comptime { FunctionSelector::from_signature("get_app_siloed_secret((Field),(Field),(u8),(Field))") };
         let returns = call_utility_function(
             registry,
-            selector,
+            GET_APP_SILOED_SECRET_SELECTOR,
             // TODO(F-671): Replace explicit caller argument once utility context exposes msg_sender().
             [sender.to_field(), recipient.to_field(), mode.to_field(), caller.to_field()],
         );
@@ -71,9 +62,12 @@ pub fn calculate_secret_and_index(
         // `validate_handshake` is needed.
         // TODO(F-660): dispatch to `perform_handshake(sender, recipient, handshake_type)` once interactive
         // handshakes are supported.
-        let selector = comptime { FunctionSelector::from_signature("non_interactive_handshake((Field),(Field),(u8))") };
         let secret: Field = context
-            .call_private_function(registry, selector, [sender.to_field(), recipient.to_field(), mode.to_field()])
+            .call_private_function(
+                registry,
+                NON_INTERACTIVE_HANDSHAKE_SELECTOR,
+                [sender.to_field(), recipient.to_field(), mode.to_field()],
+            )
             .get_preimage();
 
         // Reserve index 0 for the freshly bootstrapped secret so the PXE seeds its per-secret counter, mirroring
@@ -86,26 +80,38 @@ pub fn calculate_secret_and_index(
     } else {
         let secret = maybe_secret.unwrap_unchecked();
 
-        // Safety: the index is untrusted; the anchor branches below ensure the returned `(secret, index)` pair
-        // is bound to a real registry handshake before it leaves the helper.
+        // Safety: the returned index is untrusted; it is constrained below either by re-validating the registry
+        // handshake (`index == 0`) or by proving the prior nullifier exists (`index > 0`), which transitively
+        // chains back to the index-0 handshake.
         let index = unsafe { get_next_tagging_index(secret, mode) };
 
         if index == 0 {
-            let selector =
-                comptime { FunctionSelector::from_signature("validate_handshake((Field),(Field),(u8),Field)") };
             let _ = context.call_private_function(
                 registry,
-                selector,
+                VALIDATE_HANDSHAKE_SELECTOR,
                 [sender.to_field(), recipient.to_field(), mode.to_field(), secret],
             );
         } else {
-            let prev_nullifier = poseidon2_hash_with_separator(
-                [sender.to_field(), recipient.to_field(), secret, (index - 1) as Field],
-                DOM_SEP__CONSTRAINED_MSG_NULLIFIER,
-            );
+            let prev_nullifier = compute_constrained_msg_nullifier(sender, recipient, secret, index - 1);
             context.assert_nullifier_exists(compute_nullifier_existence_request(prev_nullifier, caller));
         }
 
         (secret, index)
     }
+}
+
+/// Computes a constrained send's chain nullifier.
+///
+/// Every constrained send at `index` must emit this nullifier so the next send under the same
+/// `(sender, recipient, secret)` can prove its predecessor exists (see [`calculate_secret_and_index`]).
+pub fn compute_constrained_msg_nullifier(
+    sender: AztecAddress,
+    recipient: AztecAddress,
+    secret: Field,
+    index: u32,
+) -> Field {
+    poseidon2_hash_with_separator(
+        [sender.to_field(), recipient.to_field(), secret, index as Field],
+        DOM_SEP__CONSTRAINED_MSG_NULLIFIER,
+    )
 }
