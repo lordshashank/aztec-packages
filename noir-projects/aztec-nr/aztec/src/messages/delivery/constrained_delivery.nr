@@ -28,8 +28,7 @@ pub global VALIDATE_HANDSHAKE_SELECTOR: FunctionSelector =
 /// Wraps the registry calls needed by every constrained-delivery app: query the handshake registry for an
 /// existing app-siloed secret, bootstrap a fresh handshake if there isn't one, and constrain the
 /// oracle-supplied secret and tagging index. The returned `(secret, index)` pair is the input for the caller's
-/// tag derivation and nullifier emission: the caller is expected to emit the matching chain nullifier (see
-/// [`compute_constrained_msg_nullifier`]) alongside each constrained send so the next call can prove the chain.
+/// tag derivation and nullifier emission.
 ///
 /// All registry calls use the [`MessageDelivery::onchain_constrained`] delivery mode: the handshake registry keys its
 /// stored notes by `(recipient, sender, mode)`, so the constrained-delivery secret must come from the
