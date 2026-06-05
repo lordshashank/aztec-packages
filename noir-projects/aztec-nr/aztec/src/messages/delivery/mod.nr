@@ -71,11 +71,11 @@ impl OnchainDeliveryMode {
         Self { inner: ONCHAIN_CONSTRAINED }
     }
 
-    /// Whether `self` is one of the recognized on-chain delivery modes.
+    /// Whether `self` is one of the valid on-chain delivery modes.
     ///
     /// Callers that receive a mode across the ABI (e.g. the handshake registry) use this to reject an arbitrary `u8`
     /// deserialized into an [`OnchainDeliveryMode`].
-    pub fn is_recognized(self) -> bool {
+    pub fn is_valid(self) -> bool {
         (self == Self::onchain_unconstrained()) | (self == Self::onchain_constrained())
     }
 
@@ -237,6 +237,10 @@ impl MessageDelivery {
 
     /// Delivers the message on-chain, guaranteeing the recipient will receive the correct content.
     ///
+    /// >**WARNING**: this delivery mode is [currently NOT fully
+    /// constrained](https://github.com/AztecProtocol/aztec-packages/issues/14565). The log's tag is unconstrained,
+    /// meaning a malicious sender could manipulate it to prevent the recipient from finding the message.
+    ///
     /// Constrained delivery derives the discovery tag from a handshake-registry secret, resolved via the standard
     /// handshake registry ([`STANDARD_HANDSHAKE_REGISTRY_ADDRESS`]) by default or a custom registry set with
     /// [`OnchainDelivery::via_handshake`]. The sending account is configured via [`OnchainDelivery::with_sender`].
@@ -292,11 +296,13 @@ impl MessageDelivery {
         }
     }
 
-    /// Returns the [`OnchainDeliveryMode`] of this built delivery, mirroring [`OnchainDelivery::mode`].
-    ///
-    /// An offchain delivery has no mode, so the result then satisfies no mode predicate (all return false).
-    fn mode(self) -> OnchainDeliveryMode {
-        OnchainDeliveryMode { inner: self.variant }
+    /// The on-chain delivery mode, or `None` for an offchain delivery (which has no mode).
+    fn mode(self) -> Option<OnchainDeliveryMode> {
+        if self.variant == OFFCHAIN {
+            Option::none()
+        } else {
+            Option::some(OnchainDeliveryMode { inner: self.variant })
+        }
     }
 }
 
@@ -340,8 +346,9 @@ where
     // dead-code elimination.
     assert_constant(delivery.variant);
 
-    let is_constrained = delivery.mode().is_constrained();
-    let deliver_as_offchain_message = delivery.variant == OFFCHAIN;
+    let mode = delivery.mode();
+    let deliver_as_offchain_message = mode.is_none();
+    let is_constrained = mode.map(|m| m.is_constrained()).unwrap_or(false);
 
     // Constrained delivery defaults to a handshake origin at construction, so an unset origin only occurs for
     // unconstrained delivery, where it defaults to the address pair (unconstrained handshake-origin delivery is
@@ -572,15 +579,15 @@ mod test {
     fn mode_matches_the_variant() {
         assert(MessageDelivery::onchain_unconstrained().mode() == OnchainDeliveryMode::onchain_unconstrained());
         assert(MessageDelivery::onchain_constrained().mode() == OnchainDeliveryMode::onchain_constrained());
-        assert(OnchainDeliveryMode::onchain_unconstrained().is_recognized());
-        assert(OnchainDeliveryMode::onchain_constrained().is_recognized());
+        assert(OnchainDeliveryMode::onchain_unconstrained().is_valid());
+        assert(OnchainDeliveryMode::onchain_constrained().is_valid());
         assert(GLOBAL_DERIVED_MODE == OnchainDeliveryMode::onchain_unconstrained());
     }
 
     #[test]
-    fn is_constrained_distinguishes_the_modes() {
-        assert(MessageDelivery::onchain_constrained().mode().is_constrained());
-        assert(!MessageDelivery::onchain_unconstrained().mode().is_constrained());
-        assert(!MessageDelivery::offchain().build_message_delivery().mode().is_constrained());
+    fn built_delivery_mode_matches_the_variant() {
+        assert(MessageDelivery::offchain().build_message_delivery().mode().is_none());
+        assert(MessageDelivery::onchain_constrained().build_message_delivery().mode().unwrap().is_constrained());
+        assert(!MessageDelivery::onchain_unconstrained().build_message_delivery().mode().unwrap().is_constrained());
     }
 }
