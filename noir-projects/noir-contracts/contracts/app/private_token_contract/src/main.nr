@@ -31,8 +31,7 @@ pub contract PrivateToken {
     #[initializer]
     fn constructor(initial_admin_balance: u128, admin: AztecAddress) {
         // Admin itself is the owner of the underlying note because we want admin to be able to transfer the admin
-        // privileges to someone else which requires being able to nullify the note. We use constrained onchain message
-        // delivery because we don't know if the party deploying this contract is incentivized to deliver the note.
+        // privileges to someone else which requires being able to nullify the note.
         self.storage.admin.initialize(AddressNote { address: admin }, admin).deliver(
             MessageDelivery::onchain_unconstrained(),
         );
