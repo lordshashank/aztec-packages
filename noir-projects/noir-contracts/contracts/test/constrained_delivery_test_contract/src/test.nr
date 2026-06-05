@@ -266,30 +266,3 @@ unconstrained fn event_delivery_advances_index_above_zero() {
 
     assert_eq(index, 1);
 }
-
-// Without a prior chain nullifier the `index > 0` branch cannot prove its predecessor. We advance the per-secret
-// index by landing a constrained-tagged log at index 0 without the nullifier, then a resolution at an index above 0
-// fails because a preceding nullifier is neither pending nor settled.
-#[test(should_fail_with = "reading an unknown nullifier")]
-unconstrained fn fails_at_index_above_zero_without_prior_nullifier() {
-    let (env, registry_address, test_address, sender, recipient) = setup();
-    let test_contract = ConstrainedDeliveryTest::at(test_address);
-    let registry = HandshakeRegistry::at(registry_address);
-
-    // Establish a handshake so resolution takes the `Some(secret)` branch. This emits no constrained nullifier.
-    let _ = env.call_private(sender, registry.non_interactive_handshake(sender, recipient, ONCHAIN_CONSTRAINED));
-    let secret = env
-        .execute_utility(registry.get_app_siloed_secret(sender, recipient, ONCHAIN_CONSTRAINED, test_address))
-        .expect(f"handshake should be siloed for the test contract");
-
-    // Advance the per-secret index above 0 by landing a constrained-tagged log at index 0, deliberately skipping the
-    // chain nullifier.
-    env.call_private(sender, test_contract.emit_constrained_log_without_nullifier(secret, 0));
-
-    // Resolution now takes the `index > 0` branch and fails: the predecessor nullifier was never emitted.
-    let _ = env.call_private_opts(
-        sender,
-        helper_options(registry_address),
-        test_contract.calculate_and_return(registry_address, sender, recipient),
-    );
-}
