@@ -354,6 +354,17 @@ where
         // Constrained tagging derives the tag from a handshake-registry secret and emits a chain nullifier; there is
         // no address-pair constrained path.
         std::static_assert(via_handshake, "constrained delivery requires a handshake origin (remove .via_address_pair())");
+        // The sender is bound into the handshake lookup and the per-send nullifier chain, so it cannot fall back to
+        // the wallet-supplied tagging hint the unconstrained path uses. Validated at compile time: a plain runtime
+        // assert on a comptime-false condition would silently poison the circuit with an unsatisfiable opcode
+        // instead of failing the build (noir#12922, noir#12923).
+        // TODO(https://github.com/noir-lang/noir/issues/12922): once comptime-false asserts become hard compile
+        // errors, both static asserts in this branch can be dropped and enforced instead with `Option::expect` at
+        // the unwrap sites in the constrained tagging branch below, failing compilation with the same messages.
+        std::static_assert(
+            delivery.sender_override.is_some(),
+            "constrained delivery requires a sender (use .with_sender())",
+        );
     } else {
         // Unconstrained handshake-origin delivery is not yet implemented; see F-698.
         std::static_assert(!via_handshake, "unconstrained handshake delivery not yet implemented (F-698)");
@@ -370,11 +381,11 @@ where
         deliver_offchain_message(ciphertext, recipient);
     } else {
         let log_tag = if is_constrained {
-            // Constrained + handshake origin (asserted above): resolve the handshake secret, emit the per-send chain
-            // nullifier, and derive the constrained discovery tag.
-            let registry = origin.handshake_registry.unwrap();
-            let sender =
-                delivery.sender_override.expect(f"constrained delivery requires a sender (use .with_sender())");
+            // Constrained + handshake origin: resolve the handshake secret, emit the per-send chain nullifier, and
+            // derive the constrained discovery tag. The static asserts above guarantee both options are populated,
+            // and the unchecked unwraps emit no constrain that could fold to false in other instantiations.
+            let registry = origin.handshake_registry.unwrap_unchecked();
+            let sender = delivery.sender_override.unwrap_unchecked();
             constrained_delivery::emit_nullifier_and_compute_constrained_tag(context, registry, sender, recipient)
         } else {
             // Unconstrained + address-pair origin: the discovery tag comes from the wallet-driven directional
