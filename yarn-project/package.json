@@ -64,8 +64,6 @@
     "validator-ha-signer",
     "wallet-sdk",
     "wallets",
-    "wsdb",
-    "wsdb/packages/*",
     "world-state"
   ],
   "prettier": "@aztec/foundation/prettier",

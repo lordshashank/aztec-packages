@@ -13,22 +13,6 @@ function compile_project {
   parallel -j16 --line-buffered --tag 'cd {} && ../node_modules/.bin/swc src -d dest --config-file=../.swcrc --strip-leading-paths' "$@"
 }
 
-function generate_wsdb_package {
-  node --experimental-strip-types --experimental-transform-types --no-warnings \
-    ../ipc-codegen/src/generate.ts \
-    --schema ../barretenberg/cpp/src/barretenberg/wsdb/wsdb_schema.json \
-    --lang ts \
-    --client \
-    --out wsdb/src/generated \
-    --prefix Wsdb \
-    --strip-method-prefix \
-    --package wsdb \
-    --package-name @aztec/wsdb \
-    --binary-name aztec-wsdb \
-    --package-transports uds,shm \
-    --ipc-runtime-dependency portal:../../ipc-runtime/ts
-}
-
 # Returns a list of project paths to compile/lint/publish.
 # Ensure exclusions are matching in both cases.
 function get_projects {
@@ -69,7 +53,7 @@ function format {
   # Build the paths array to search
   local paths=()
   if [ ${#packages[@]} -eq 0 ]; then
-    paths=(./!(wsdb)/src)
+    paths=(./*/src)
   else
     for pkg in "${packages[@]}"; do
       if [ ! -d "./$pkg/src" ]; then
@@ -120,7 +104,7 @@ function lint {
     printf '%s\n' "${packages[@]}" | parallel -j 50% "cd {} && ../node_modules/.bin/eslint --cache $arg ./src"
   else
     # Lint all packages in parallel (use at most half of CPU cores)
-    get_projects | grep -v '/wsdb$' | parallel -j 50% "cd {} && ../node_modules/.bin/eslint --cache $arg ./src"
+    get_projects | parallel -j 50% "cd {} && ../node_modules/.bin/eslint --cache $arg ./src"
   fi
 }
 
@@ -137,7 +121,6 @@ function compile_all {
 
   # Ensure the pinned version sqlite3mc-wasm upstream artifacts are present before any package builds.
   ./sqlite3mc-wasm/scripts/vendor.sh ensure
-  generate_wsdb_package
 
   compile_project ::: constants foundation stdlib blob-lib builder ethereum l1-artifacts
 
@@ -182,12 +165,11 @@ function compile_all {
   fi
 }
 
-export -f compile_project generate_wsdb_package format lint get_projects compile_all hash
+export -f compile_project format lint get_projects compile_all hash
 
 function build {
   echo_header "yarn-project build"
   denoise "./bootstrap.sh clean-lite"
-  denoise "generate_wsdb_package"
   npm_install_deps ../noir
   denoise "compile_all"
 }
