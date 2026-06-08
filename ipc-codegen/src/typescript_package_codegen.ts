@@ -6,6 +6,7 @@ export interface TypeScriptPackageOptions {
   binaryName: string;
   binaryEnvVar: string;
   ipcRuntimeDependency: string;
+  ipcPathArgs: string[];
   transports: string[];
 }
 
@@ -152,6 +153,7 @@ export class TypeScriptPackageCodegen {
     const findBinary = binaryFinderName(prefix);
     const supportsShm = this.opts.transports.includes("shm");
     const transports = this.opts.transports.map((t) => `'${t}'`).join(" | ");
+    const ipcPathArgs = JSON.stringify(this.opts.ipcPathArgs);
     const defaultTransport = this.opts.transports.includes("uds")
       ? "uds"
       : this.opts.transports[0]!;
@@ -211,7 +213,8 @@ class SpawnedBackend implements IpcClientAsync {
       unlinkSync(ipcPath);
     }
 
-    const child = spawn(binaryPath, ['--socket', ipcPath, ...(options.extraArgs ?? [])], {
+    const ipcPathArgs = ${ipcPathArgs}.map((arg: string) => arg === '{path}' ? ipcPath : arg);
+    const child = spawn(binaryPath, [...ipcPathArgs, ...(options.extraArgs ?? [])], {
       stdio: ['ignore', options.logger ? 'pipe' : 'ignore', options.logger ? 'pipe' : 'ignore'],
       env: { ...process.env, ...(options.env ?? {}) },
     });

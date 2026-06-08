@@ -67,6 +67,7 @@ interface Args {
   binaryName: string;
   binaryEnvVar: string;
   packageTransports: string;
+  packageIpcPathArgs: string;
   ipcRuntimeDependency: string;
   cppNamespace: string;
   cppWireNamespace: string;
@@ -91,6 +92,7 @@ function parseArgs(argv: string[]): Args {
     binaryName: "",
     binaryEnvVar: "",
     packageTransports: "uds",
+    packageIpcPathArgs: "--socket,{path}",
     ipcRuntimeDependency: "@aztec/ipc-runtime",
     cppNamespace: "",
     cppWireNamespace: "wire",
@@ -139,6 +141,9 @@ function parseArgs(argv: string[]): Args {
       case "--package-transports":
         args.packageTransports = argv[++i];
         break;
+      case "--package-ipc-path-args":
+        args.packageIpcPathArgs = argv[++i];
+        break;
       case "--ipc-runtime-dependency":
         args.ipcRuntimeDependency = argv[++i];
         break;
@@ -185,6 +190,8 @@ Optional:
   --package-name <name>    TS package name for --package
   --binary-name <name>     Native service binary name for --package
   --package-transports <t> Comma-separated transports for --package (uds,shm)
+  --package-ipc-path-args <args>
+                           Comma-separated binary args for IPC path; use {path}
   --prefix <str>           Type prefix (auto-detected if omitted)
   --cpp-namespace <ns>     C++ namespace (e.g. my::ns)
   --cpp-wire-namespace <ns> Wire types sub-namespace (default: wire)
@@ -352,6 +359,10 @@ function generate(args: Args) {
           transports: args.packageTransports
             .split(",")
             .map((t) => t.trim())
+            .filter(Boolean),
+          ipcPathArgs: args.packageIpcPathArgs
+            .split(",")
+            .map((arg) => arg.trim())
             .filter(Boolean),
         });
         const writePackage = (

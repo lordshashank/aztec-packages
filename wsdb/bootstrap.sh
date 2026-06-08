@@ -21,7 +21,8 @@ function generate_ts_package {
     --package "$ROOT/wsdb/ts" \
     --package-name @aztec/wsdb \
     --binary-name "$WSDB_BINARY" \
-    --package-transports uds,shm
+    --package-transports uds,shm \
+    --package-ipc-path-args 'msgpack,run,--input,{path}'
 }
 
 function copy_native {
