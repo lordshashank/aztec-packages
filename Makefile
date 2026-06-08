@@ -310,7 +310,7 @@ ipc-runtime-cross: ipc-runtime ipc-runtime-cross-arm64-linux ipc-runtime-cross-a
 # WSDB
 #==============================================================================
 
-wsdb: bb-cpp-native ipc-runtime
+wsdb: ipc-codegen ipc-runtime bb-cpp-native
 	$(call build,$@,wsdb)
 
 #==============================================================================
