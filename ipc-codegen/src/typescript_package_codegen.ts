@@ -7,7 +7,6 @@ export interface TypeScriptPackageOptions {
   binaryEnvVar: string;
   ipcRuntimeDependency: string;
   transports: string[];
-  generateCommand?: string;
 }
 
 function className(prefix: string): string {
@@ -71,9 +70,6 @@ export class TypeScriptPackageCodegen {
       build: "tsc -p tsconfig.json",
       prepare_arch_packages: "./scripts/prepare_arch_packages.sh",
     };
-    if (this.opts.generateCommand) {
-      scripts.generate = this.opts.generateCommand;
-    }
 
     const pkg = {
       name: this.opts.packageName,

@@ -34,7 +34,7 @@ import {
   rmSync,
 } from "fs";
 import { execSync } from "child_process";
-import { dirname, join, relative, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { SchemaVisitor, type CompiledSchema } from "./schema_visitor.ts";
 import { TypeScriptCodegen } from "./typescript_codegen.ts";
@@ -285,10 +285,6 @@ function formatCpp(files: string[]) {
   }
 }
 
-function shellArg(value: string): string {
-  return JSON.stringify(value);
-}
-
 // ---------------------------------------------------------------------------
 // Generation
 // ---------------------------------------------------------------------------
@@ -347,34 +343,6 @@ function generate(args: Args) {
           args.binaryName || toSnakeCase(prefix).replace(/_/g, "-");
         const packageName =
           args.packageName || `${toSnakeCase(prefix).replace(/_/g, "-")}-ipc`;
-        const packageOut = relative(packageDir, absOut) || ".";
-        const packageSchema = relative(packageDir, absSchema) || ".";
-        const codegenEntry = relative(packageDir, join(__dirname, "generate.ts"));
-        const generateCommand = [
-          "node --experimental-strip-types --experimental-transform-types --no-warnings",
-          shellArg(codegenEntry),
-          "--schema",
-          shellArg(packageSchema),
-          "--lang ts",
-          "--client",
-          "--out",
-          shellArg(packageOut),
-          "--prefix",
-          shellArg(prefix),
-          ...(args.stripMethodPrefix ? ["--strip-method-prefix"] : []),
-          "--package .",
-          "--package-name",
-          shellArg(packageName),
-          "--binary-name",
-          shellArg(binaryName),
-          "--package-transports",
-          shellArg(args.packageTransports),
-          "--ipc-runtime-dependency",
-          shellArg(args.ipcRuntimeDependency),
-          ...(args.binaryEnvVar
-            ? ["--binary-env-var", shellArg(args.binaryEnvVar)]
-            : []),
-        ].join(" ");
         const packageGen = new TypeScriptPackageCodegen({
           prefix,
           packageName,
@@ -385,7 +353,6 @@ function generate(args: Args) {
             .split(",")
             .map((t) => t.trim())
             .filter(Boolean),
-          generateCommand,
         });
         const writePackage = (
           name: string,
