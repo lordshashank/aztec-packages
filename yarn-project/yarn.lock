@@ -1419,6 +1419,12 @@ __metadata:
   languageName: node
   linkType: soft
 
+"@aztec/ipc-runtime@portal:../../ipc-runtime/ts::locator=%40aztec%2Fwsdb%40workspace%3Awsdb":
+  version: 0.0.0-use.local
+  resolution: "@aztec/ipc-runtime@portal:../../ipc-runtime/ts::locator=%40aztec%2Fwsdb%40workspace%3Awsdb"
+  languageName: node
+  linkType: soft
+
 "@aztec/ivc-integration@workspace:ivc-integration":
   version: 0.0.0-use.local
   resolution: "@aztec/ivc-integration@workspace:ivc-integration"
@@ -2350,6 +2356,55 @@ __metadata:
     tslib: "npm:^2.4.0"
     typescript: "npm:^5.3.3"
     zod: "npm:^4"
+  languageName: unknown
+  linkType: soft
+
+"@aztec/wsdb-darwin-arm64@npm:0.1.0, @aztec/wsdb-darwin-arm64@workspace:wsdb/packages/wsdb-darwin-arm64":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-darwin-arm64@workspace:wsdb/packages/wsdb-darwin-arm64"
+  languageName: unknown
+  linkType: soft
+
+"@aztec/wsdb-darwin-x64@npm:0.1.0, @aztec/wsdb-darwin-x64@workspace:wsdb/packages/wsdb-darwin-x64":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-darwin-x64@workspace:wsdb/packages/wsdb-darwin-x64"
+  languageName: unknown
+  linkType: soft
+
+"@aztec/wsdb-linux-arm64@npm:0.1.0, @aztec/wsdb-linux-arm64@workspace:wsdb/packages/wsdb-linux-arm64":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-linux-arm64@workspace:wsdb/packages/wsdb-linux-arm64"
+  languageName: unknown
+  linkType: soft
+
+"@aztec/wsdb-linux-x64@npm:0.1.0, @aztec/wsdb-linux-x64@workspace:wsdb/packages/wsdb-linux-x64":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-linux-x64@workspace:wsdb/packages/wsdb-linux-x64"
+  languageName: unknown
+  linkType: soft
+
+"@aztec/wsdb@workspace:wsdb":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb@workspace:wsdb"
+  dependencies:
+    "@aztec/ipc-runtime": "portal:../../ipc-runtime/ts"
+    "@aztec/wsdb-darwin-arm64": "npm:0.1.0"
+    "@aztec/wsdb-darwin-x64": "npm:0.1.0"
+    "@aztec/wsdb-linux-arm64": "npm:0.1.0"
+    "@aztec/wsdb-linux-x64": "npm:0.1.0"
+    "@types/node": "npm:^22.15.17"
+    msgpackr: "npm:^1.11.2"
+    tslib: "npm:^2.4.0"
+    typescript: "npm:^5.3.3"
+  dependenciesMeta:
+    "@aztec/wsdb-darwin-arm64":
+      optional: true
+    "@aztec/wsdb-darwin-x64":
+      optional: true
+    "@aztec/wsdb-linux-arm64":
+      optional: true
+    "@aztec/wsdb-linux-x64":
+      optional: true
   languageName: unknown
   linkType: soft
 

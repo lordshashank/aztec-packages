@@ -7,6 +7,7 @@ export interface TypeScriptPackageOptions {
   binaryEnvVar: string;
   ipcRuntimeDependency: string;
   transports: string[];
+  generateCommand?: string;
 }
 
 function className(prefix: string): string {
@@ -44,6 +45,13 @@ function archPackageNames(packageName: string): Record<string, string> {
   };
 }
 
+const ARCH_PACKAGES = [
+  { buildDir: "amd64-linux", suffix: "linux-x64", os: "linux", cpu: "x64" },
+  { buildDir: "arm64-linux", suffix: "linux-arm64", os: "linux", cpu: "arm64" },
+  { buildDir: "amd64-macos", suffix: "darwin-x64", os: "darwin", cpu: "x64" },
+  { buildDir: "arm64-macos", suffix: "darwin-arm64", os: "darwin", cpu: "arm64" },
+] as const;
+
 export function defaultBinaryEnvVar(binaryName: string): string {
   return envName(binaryName);
 }
@@ -58,6 +66,15 @@ export class TypeScriptPackageCodegen {
         "0.1.0",
       ]),
     );
+    const scripts: Record<string, string> = {
+      clean: "rm -rf dest .tsbuildinfo",
+      build: "tsc -p tsconfig.json",
+      prepare_arch_packages: "./scripts/prepare_arch_packages.sh",
+    };
+    if (this.opts.generateCommand) {
+      scripts.generate = this.opts.generateCommand;
+    }
+
     const pkg = {
       name: this.opts.packageName,
       version: "0.1.0",
@@ -69,25 +86,41 @@ export class TypeScriptPackageCodegen {
         },
       },
       files: ["dest/", "build/", "README.md"],
-      scripts: {
-        clean: "rm -rf dest tsconfig.tsbuildinfo",
-        build: "tsc -p tsconfig.json",
-        test: "tsx src/package_test.ts",
-        prepare_arch_packages: "./scripts/prepare_arch_packages.sh",
-      },
+      scripts,
       dependencies: {
         "@aztec/ipc-runtime": this.opts.ipcRuntimeDependency,
-        msgpackr: "^1.10.0",
+        msgpackr: "^1.11.2",
         tslib: "^2.4.0",
       },
       optionalDependencies,
       devDependencies: {
         "@types/node": "^22.15.17",
-        tsx: "^4.19.0",
         typescript: "^5.3.3",
       },
     };
     return JSON.stringify(pkg, null, 2) + "\n";
+  }
+
+  generateArchPackageJson(suffix: string, os: string, cpu: string): string {
+    const pkg = {
+      name: `${this.opts.packageName}-${suffix}`,
+      version: "0.1.0",
+      description: `Native binary for ${this.opts.packageName} (${suffix})`,
+      license: "MIT",
+      os: [os],
+      cpu: [cpu],
+      files: [this.opts.binaryName],
+      preferUnplugged: true,
+    };
+    return JSON.stringify(pkg, null, 2) + "\n";
+  }
+
+  generateArchPackageManifests(): Array<{ path: string; content: string }> {
+    const stem = packageStem(this.opts.packageName);
+    return ARCH_PACKAGES.map(({ suffix, os, cpu }) => ({
+      path: `packages/${stem}-${suffix}/package.json`,
+      content: this.generateArchPackageJson(suffix, os, cpu),
+    }));
   }
 
   generateTsconfig(): string {
@@ -98,8 +131,11 @@ export class TypeScriptPackageCodegen {
           module: "NodeNext",
           moduleResolution: "NodeNext",
           declaration: true,
+          declarationMap: true,
+          composite: true,
           outDir: "dest",
           rootDir: "src",
+          tsBuildInfoFile: ".tsbuildinfo",
           strict: true,
           esModuleInterop: true,
           skipLibCheck: true,
@@ -401,10 +437,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 declare -A PLATFORMS=(
-  ["amd64-linux"]="linux-x64 linux x64"
-  ["arm64-linux"]="linux-arm64 linux arm64"
-  ["amd64-macos"]="darwin-x64 darwin x64"
-  ["arm64-macos"]="darwin-arm64 darwin arm64"
+${ARCH_PACKAGES.map(({ buildDir, suffix, os, cpu }) => `  ["${buildDir}"]="${suffix} ${os} ${cpu}"`).join("\n")}
 )
 
 version=$(node -p "require('./package.json').version")

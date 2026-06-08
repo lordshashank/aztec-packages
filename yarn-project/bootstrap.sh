@@ -139,7 +139,8 @@ function compile_all {
     noir-protocol-circuits-types \
     protocol-contracts \
     pxe \
-    standard-contracts
+    standard-contracts \
+    wsdb
   cat joblog.txt
 
   get_projects | compile_project

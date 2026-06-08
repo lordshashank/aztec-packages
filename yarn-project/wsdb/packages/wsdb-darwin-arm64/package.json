@@ -1,0 +1,16 @@
+{
+  "name": "@aztec/wsdb-darwin-arm64",
+  "version": "0.1.0",
+  "description": "Native binary for @aztec/wsdb (darwin-arm64)",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "aztec-wsdb"
+  ],
+  "preferUnplugged": true
+}
