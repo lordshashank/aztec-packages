@@ -1413,9 +1413,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@aztec/ipc-runtime@portal:../../ipc-runtime/ts::locator=%40aztec%2Fbb.js%40portal%3A..%2Fbarretenberg%2Fts%3A%3Alocator%3D%2540aztec%252Faztec3-packages%2540workspace%253A.":
+"@aztec/ipc-runtime@portal:../ipc-runtime/ts::locator=%40aztec%2Faztec3-packages%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@aztec/ipc-runtime@portal:../../ipc-runtime/ts::locator=%40aztec%2Fbb.js%40portal%3A..%2Fbarretenberg%2Fts%3A%3Alocator%3D%2540aztec%252Faztec3-packages%2540workspace%253A."
+  resolution: "@aztec/ipc-runtime@portal:../ipc-runtime/ts::locator=%40aztec%2Faztec3-packages%40workspace%3A."
   languageName: node
   linkType: soft
 
@@ -2339,6 +2339,7 @@ __metadata:
     "@aztec/protocol-contracts": "workspace:^"
     "@aztec/stdlib": "workspace:^"
     "@aztec/telemetry-client": "workspace:^"
+    "@aztec/wsdb": "npm:0.1.0"
     "@jest/globals": "npm:^30.0.0"
     "@types/jest": "npm:^30.0.0"
     "@types/node": "npm:^22.15.17"
@@ -2351,6 +2352,57 @@ __metadata:
     typescript: "npm:^5.3.3"
     zod: "npm:^4"
   languageName: unknown
+  linkType: soft
+
+"@aztec/wsdb-darwin-arm64@portal:../wsdb/ts/packages/wsdb-darwin-arm64::locator=%40aztec%2Faztec3-packages%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-darwin-arm64@portal:../wsdb/ts/packages/wsdb-darwin-arm64::locator=%40aztec%2Faztec3-packages%40workspace%3A."
+  conditions: os=darwin & cpu=arm64
+  languageName: node
+  linkType: soft
+
+"@aztec/wsdb-darwin-x64@portal:../wsdb/ts/packages/wsdb-darwin-x64::locator=%40aztec%2Faztec3-packages%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-darwin-x64@portal:../wsdb/ts/packages/wsdb-darwin-x64::locator=%40aztec%2Faztec3-packages%40workspace%3A."
+  conditions: os=darwin & cpu=x64
+  languageName: node
+  linkType: soft
+
+"@aztec/wsdb-linux-arm64@portal:../wsdb/ts/packages/wsdb-linux-arm64::locator=%40aztec%2Faztec3-packages%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-linux-arm64@portal:../wsdb/ts/packages/wsdb-linux-arm64::locator=%40aztec%2Faztec3-packages%40workspace%3A."
+  conditions: os=linux & cpu=arm64
+  languageName: node
+  linkType: soft
+
+"@aztec/wsdb-linux-x64@portal:../wsdb/ts/packages/wsdb-linux-x64::locator=%40aztec%2Faztec3-packages%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb-linux-x64@portal:../wsdb/ts/packages/wsdb-linux-x64::locator=%40aztec%2Faztec3-packages%40workspace%3A."
+  conditions: os=linux & cpu=x64
+  languageName: node
+  linkType: soft
+
+"@aztec/wsdb@portal:../wsdb/ts::locator=%40aztec%2Faztec3-packages%40workspace%3A.":
+  version: 0.0.0-use.local
+  resolution: "@aztec/wsdb@portal:../wsdb/ts::locator=%40aztec%2Faztec3-packages%40workspace%3A."
+  dependencies:
+    "@aztec/ipc-runtime": "@aztec/ipc-runtime"
+    "@aztec/wsdb-darwin-arm64": "npm:0.1.0"
+    "@aztec/wsdb-darwin-x64": "npm:0.1.0"
+    "@aztec/wsdb-linux-arm64": "npm:0.1.0"
+    "@aztec/wsdb-linux-x64": "npm:0.1.0"
+    msgpackr: "npm:^1.11.2"
+    tslib: "npm:^2.4.0"
+  dependenciesMeta:
+    "@aztec/wsdb-darwin-arm64":
+      optional: true
+    "@aztec/wsdb-darwin-x64":
+      optional: true
+    "@aztec/wsdb-linux-arm64":
+      optional: true
+    "@aztec/wsdb-linux-x64":
+      optional: true
+  languageName: node
   linkType: soft
 
 "@babel/code-frame@npm:^7.0.0, @babel/code-frame@npm:^7.27.1":
