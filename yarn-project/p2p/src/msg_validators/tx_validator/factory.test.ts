@@ -212,7 +212,6 @@ describe('Validator factory functions', () => {
         timestamp: 100n,
         blockNumber: BlockNumber(5),
         txsPermitted: true,
-        rollupManaLimit: Number.MAX_SAFE_INTEGER,
       });
 
       const aggregate = validator as AggregateTxValidator<unknown>;
@@ -241,7 +240,6 @@ describe('Validator factory functions', () => {
         timestamp: 100n,
         blockNumber: BlockNumber(5),
         txsPermitted: true,
-        rollupManaLimit: Number.MAX_SAFE_INTEGER,
       });
 
       const aggregate = validator as AggregateTxValidator<unknown>;
@@ -259,7 +257,6 @@ describe('Validator factory functions', () => {
         timestamp: 100n,
         blockNumber: BlockNumber(5),
         txsPermitted: true,
-        rollupManaLimit: Number.MAX_SAFE_INTEGER,
       });
 
       const aggregate = validator as AggregateTxValidator<unknown>;
@@ -308,7 +305,7 @@ describe('Validator factory functions', () => {
         synchronizer,
         100n,
         BlockNumber(5),
-        { rollupManaLimit: Number.MAX_SAFE_INTEGER },
+        {},
         new GasFees(1, 1),
       );
 
@@ -328,7 +325,7 @@ describe('Validator factory functions', () => {
         synchronizer,
         100n,
         BlockNumber(5),
-        { rollupManaLimit: Number.MAX_SAFE_INTEGER },
+        {},
         new GasFees(1, 1),
       );
 

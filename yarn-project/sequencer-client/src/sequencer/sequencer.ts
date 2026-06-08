@@ -21,6 +21,7 @@ import type {
 import type { Checkpoint, ProposedCheckpointData } from '@aztec/stdlib/checkpoint';
 import type { ChainConfig } from '@aztec/stdlib/config';
 import { getEpochAtSlot } from '@aztec/stdlib/epoch-helpers';
+import { builderMeetsNetworkTxGasLimits } from '@aztec/stdlib/gas';
 import {
   type ResolvedSequencerConfig,
   type SequencerConfig,
@@ -194,7 +195,39 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
       );
     }
 
+    this.assertConfigMeetsNetworkTxLimits(maxNumberOfBlocks);
+
     return timetable;
+  }
+
+  /**
+   * Fails startup (and runtime config updates) if this node's configured per-block allocation grants a
+   * single tx less than the network admission limit. A node advertises and admits txs up to the limit
+   * derived from the network-minimum multipliers (see {@link computeNetworkTxGasLimits}); if its builder is
+   * configured below that floor, it would accept txs over RPC/gossip that it can never pack into a block.
+   * Operators may configure a higher (more generous) multiplier, but not a lower one.
+   */
+  private assertConfigMeetsNetworkTxLimits(maxBlocksPerCheckpoint: number) {
+    const { meets, networkLimit, builderLimit } = builderMeetsNetworkTxGasLimits({
+      maxBlocksPerCheckpoint,
+      manaCheckpointBudget: this.l1Constants.rollupManaLimit,
+      daMultiplier: this.config.perBlockDAAllocationMultiplier ?? this.config.perBlockAllocationMultiplier,
+      l2Multiplier: this.config.perBlockAllocationMultiplier,
+      daBlockGasCap: this.config.maxDABlockGas,
+      l2BlockGasCap: this.config.maxL2BlockGas,
+    });
+
+    if (!meets) {
+      throw new Error(
+        `Sequencer per-block allocation is below the network admission limit: a single tx may be admitted ` +
+          `with up to da:${networkLimit.daGas},l2:${networkLimit.l2Gas} gas, but this node's builder would only ` +
+          `grant da:${builderLimit.daGas},l2:${builderLimit.l2Gas} (perBlockAllocationMultiplier=` +
+          `${this.config.perBlockAllocationMultiplier}, perBlockDAAllocationMultiplier=` +
+          `${this.config.perBlockDAAllocationMultiplier}, maxDABlockGas=${this.config.maxDABlockGas}, ` +
+          `maxL2BlockGas=${this.config.maxL2BlockGas}, maxBlocksPerCheckpoint=${maxBlocksPerCheckpoint}). ` +
+          `Raise the multipliers and/or per-block gas caps to at least the network minimums.`,
+      );
+    }
   }
 
   /** Initializes the sequencer (precomputes tables). Takes about 3s. */

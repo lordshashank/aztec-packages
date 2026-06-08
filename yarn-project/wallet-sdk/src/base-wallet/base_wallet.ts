@@ -48,7 +48,7 @@ import {
   getContractClassFromArtifact,
 } from '@aztec/stdlib/contract';
 import { SimulationError } from '@aztec/stdlib/errors';
-import { Gas, GasFees, GasSettings, ManaUsageEstimate } from '@aztec/stdlib/gas';
+import { Gas, GasFees, GasSettings, ManaUsageEstimate, getDefaultNetworkTxGasLimits } from '@aztec/stdlib/gas';
 import {
   computeSiloedPrivateInitializationNullifier,
   computeSiloedPublicInitializationNullifier,
@@ -166,6 +166,19 @@ export abstract class BaseWallet implements Wallet {
     return { chainId: new Fr(l1ChainId), version: new Fr(rollupVersion) };
   }
 
+  /**
+   * Gas limits a single tx may declare on this wallet's network, used as the default when sending without
+   * explicit limits or gas estimation. Read once from the node (a wallet talks to a single network for its
+   * lifetime); falls back to the mainnet defaults for nodes that predate the `txsLimits` field.
+   */
+  private async getDefaultTxGasLimits(): Promise<Gas> {
+    if (!this.nodeInfoPromise) {
+      this.nodeInfoPromise = this.aztecNode.getNodeInfo();
+    }
+    const { txsLimits } = await this.nodeInfoPromise;
+    return txsLimits ? new Gas(txsLimits.gas.daGas, txsLimits.gas.l2Gas) : getDefaultNetworkTxGasLimits();
+  }
+
   protected async createTxExecutionRequestFromPayloadAndFee(
     executionPayload: ExecutionPayload,
     from: AztecAddress | NoFrom,
@@ -272,10 +285,14 @@ export abstract class BaseWallet implements Wallet {
       maxPriorityFeesPerGas: gasSettings?.maxPriorityFeesPerGas ?? GasFees.empty(),
     };
     // When estimating gas (simulation), use high limits so the simulation doesn't run out of gas.
-    // When sending for real, use protocol max limits that the network will actually accept.
+    // When sending for real without explicit limits, declare the most a single tx may use on this network
+    // (the node's per-block allocation), so the proposer does not skip the tx for over-declaring gas.
     const fullGasSettings = forEstimation
       ? GasSettings.forEstimation(gasSettingsOverrides)
-      : GasSettings.fallback(gasSettingsOverrides);
+      : GasSettings.fallback({
+          ...gasSettingsOverrides,
+          gasLimits: gasSettingsOverrides.gasLimits ?? (await this.getDefaultTxGasLimits()),
+        });
     this.log.debug(`Using L2 gas settings`, fullGasSettings);
     return {
       gasSettings: fullGasSettings,

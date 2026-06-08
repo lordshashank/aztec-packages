@@ -100,7 +100,7 @@ export function createFirstStageTxValidationsForGossipedTransactions(
   txsPermitted: boolean,
   allowedInSetup: AllowedElement[] = [],
   bindings?: LoggerBindings,
-  gasLimitOpts?: { rollupManaLimit?: number; maxBlockL2Gas?: number; maxBlockDAGas?: number },
+  gasLimitOpts?: { maxTxL2Gas?: number; maxTxDAGas?: number },
 ): Record<string, TransactionValidator> {
   const merkleTree = worldStateSynchronizer.getCommitted();
 
@@ -295,9 +295,8 @@ export function createTxValidatorForAcceptingTxsOverRPC(
     timestamp,
     blockNumber,
     txsPermitted,
-    rollupManaLimit,
-    maxBlockL2Gas,
-    maxBlockDAGas,
+    maxTxL2Gas,
+    maxTxDAGas,
   }: {
     l1ChainId: number;
     rollupVersion: number;
@@ -307,9 +306,8 @@ export function createTxValidatorForAcceptingTxsOverRPC(
     timestamp: UInt64;
     blockNumber: BlockNumber;
     txsPermitted: boolean;
-    rollupManaLimit: number;
-    maxBlockL2Gas?: number;
-    maxBlockDAGas?: number;
+    maxTxL2Gas?: number;
+    maxTxDAGas?: number;
   },
   bindings?: LoggerBindings,
 ): TxValidator<Tx> {
@@ -342,9 +340,8 @@ export function createTxValidatorForAcceptingTxsOverRPC(
   if (!skipFeeEnforcement) {
     validators.push(
       new GasTxValidator(new DatabasePublicStateSource(db), ProtocolContractAddress.FeeJuice, gasFees, bindings, {
-        rollupManaLimit,
-        maxBlockL2Gas,
-        maxBlockDAGas,
+        maxTxL2Gas,
+        maxTxDAGas,
       }),
     );
   }
@@ -431,7 +428,7 @@ export async function createTxValidatorForTransactionsEnteringPendingTxPool(
   worldStateSynchronizer: WorldStateSynchronizer,
   timestamp: bigint,
   blockNumber: BlockNumber,
-  gasLimitOpts: { rollupManaLimit?: number; maxBlockL2Gas?: number; maxBlockDAGas?: number },
+  gasLimitOpts: { maxTxL2Gas?: number; maxTxDAGas?: number },
   gasFees: GasFees,
   bindings?: LoggerBindings,
 ): Promise<TxValidator<TxMetaData>> {
