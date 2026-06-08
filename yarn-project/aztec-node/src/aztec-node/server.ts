@@ -163,16 +163,8 @@ import {
   createValidatorClient,
 } from '@aztec/validator-client';
 import type { SlashingProtectionDatabase } from '@aztec/validator-ha-signer/types';
-import {
-  IpcWorldState,
-  WorldStateInstrumentation,
-  createWorldState,
-  createWorldStateSynchronizer,
-  getWsdbOptions,
-} from '@aztec/world-state';
+import { createWorldState, createWorldStateSynchronizer } from '@aztec/world-state';
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createPublicClient } from 'viem';
 
@@ -607,77 +599,32 @@ export class AztecNodeService implements AztecNode, AztecNodeAdmin, AztecNodeDeb
 
     const epochCache = await EpochCache.create(config.rollupAddress, config, { dateProvider });
 
-    // Set up IPC backends for world state and AVM simulation.
-    const { WsdbBackend } = await import('@aztec/bb.js/aztec-wsdb');
-
-    const configuredDataDir = config.worldStateDataDirectory ?? config.dataDirectory;
-    const dataDirectory = configuredDataDir ?? (await mkdtemp(join(tmpdir(), 'aztec-world-state-')));
-    const dataStoreMapSizeKb = config.worldStateDbMapSizeKb ?? config.dataStoreMapSizeKb;
-    const wsTreeMapSizes = {
-      archiveTreeMapSizeKb: config.archiveTreeMapSizeKb ?? dataStoreMapSizeKb,
-      nullifierTreeMapSizeKb: config.nullifierTreeMapSizeKb ?? dataStoreMapSizeKb,
-      noteHashTreeMapSizeKb: config.noteHashTreeMapSizeKb ?? dataStoreMapSizeKb,
-      messageTreeMapSizeKb: config.messageTreeMapSizeKb ?? dataStoreMapSizeKb,
-      publicDataTreeMapSizeKb: config.publicDataTreeMapSizeKb ?? dataStoreMapSizeKb,
-    };
-    const wsdbOpts = getWsdbOptions(dataDirectory, wsTreeMapSizes);
-    const prefilledData = (options.genesis?.prefilledPublicData ?? []).map(
-      d => [d.slot.toBuffer(), d.value.toBuffer()] as [Buffer, Buffer],
-    );
-
-    log.info('Starting IPC backends', { dataDir: dataDirectory });
-
-    const wsdbBackend = await WsdbBackend.new({
-      dataDir: join(dataDirectory, 'world_state'),
-      ...wsdbOpts,
-      prefilledPublicData: prefilledData,
-      genesisTimestamp: Number(options.genesis?.genesisTimestamp ?? 0),
-      logger: (msg: string) => log.debug(msg),
-      useShm: false,
-    });
-
+    log.info('Starting IPC backends');
     const cdbServer = new CdbIpcServer();
-
-    log.info('WSDB ready, creating AVM simulator pool');
-    const avmPool = await AvmSimulatorPool.spawn({
-      wsdbSocketPath: wsdbBackend.getSocketPath(),
-      cdbSocketPath: cdbServer.socketPath,
-      logger: (msg: string) => log.debug(msg),
-    });
-
-    const wsdbDir = join(dataDirectory, 'world_state');
-    const recreateIpcInstance = async () => {
-      await rm(wsdbDir, { recursive: true, force: true, maxRetries: 3 });
-      await mkdir(wsdbDir, { recursive: true });
-      const freshBackend = await WsdbBackend.new({
-        dataDir: wsdbDir,
-        ...wsdbOpts,
-        prefilledPublicData: prefilledData,
-        logger: (msg: string) => log.debug(msg),
-        useShm: false,
-      });
-      return new IpcWorldState(freshBackend, new WorldStateInstrumentation(telemetry));
-    };
 
     // Track started resources so we can clean up on partial failure during node creation.
     const started: { stop?(): Promise<void> | void }[] = [];
     try {
+      started.push({ stop: () => cdbServer.close() });
+
       // Default the orphan-prune grace window from the block build duration when unset, so the archiver
       // waits roughly one build slot for a proposed checkpoint to arrive before pruning a block-only tip.
       config.orphanProposedBlockPruneGraceSeconds ??=
         config.blockDurationMs !== undefined ? Math.ceil(config.blockDurationMs / 1000) : MIN_EXECUTION_TIME;
 
       // Create world-state first so we can retrieve the initial header before constructing the archiver.
-      const nativeWs = await createWorldState(
-        config,
-        options.genesis,
-        undefined,
-        undefined,
-        wsdbBackend,
-        recreateIpcInstance,
-      );
+      const nativeWs = await createWorldState(config, options.genesis);
       const initialHeader = nativeWs.getInitialHeader();
       const initialBlockHash = await initialHeader.hash();
+
+      log.info('WSDB ready, creating AVM simulator pool');
+      const avmPool = await AvmSimulatorPool.spawn({
+        wsdbSocketPath: nativeWs.getSocketPath(),
+        cdbSocketPath: cdbServer.socketPath,
+        logger: (msg: string) => log.debug(msg),
+      });
+      started.push({ stop: () => avmPool.destroy() });
+
       const archiver = await createArchiver(
         config,
         { blobClient, epochCache, telemetry, dateProvider },
