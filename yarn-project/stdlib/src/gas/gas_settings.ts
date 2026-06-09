@@ -8,17 +8,6 @@ import { z } from 'zod';
 import { Gas, GasDimensions } from './gas.js';
 import { GasFees } from './gas_fees.js';
 
-// NOTE: these are legacy/fixture constants. `GasSettings.fallback` no longer uses them — it takes the
-// effective `gasLimits` from its caller (typically a node's advertised `txsLimits.gas`) and derives the
-// teardown split from that total. They remain for test fixtures that need fixed arbitrary gas values.
-
-/** Arbitrary DA gas value (assumes 4 blocks per checkpoint). Used by test fixtures; not the fallback default. */
-export const APPROXIMATE_MAX_DA_GAS_PER_BLOCK = Math.floor(MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT / 4);
-/** Arbitrary teardown L2 gas value used by test fixtures. */
-export const FALLBACK_TEARDOWN_L2_GAS_LIMIT = Math.floor(MAX_PROCESSABLE_L2_GAS / 8);
-/** Arbitrary teardown DA gas value used by test fixtures. */
-export const FALLBACK_TEARDOWN_DA_GAS_LIMIT = Math.floor(APPROXIMATE_MAX_DA_GAS_PER_BLOCK / 2);
-
 // For gas estimation, we use intentionally high limits above what the network can process,
 // so the simulation runs without hitting gas caps. Since teardown gas is counted towards total,
 // the total estimation limit is teardown + max processable.
