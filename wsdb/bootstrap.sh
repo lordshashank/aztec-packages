@@ -52,6 +52,7 @@ function build {
   copy_native
   npm_install_deps
   yarn build
+  (cd ts && yarn prepare_arch_packages)
 }
 
 function clean {
