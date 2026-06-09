@@ -11,6 +11,21 @@ This changelog documents all configuration changes, new features, and breaking c
 
 ## Version history
 
+### [v5.0.0](./v5.md)
+
+New features and configuration options for node operators.
+
+**Key changes:**
+- Network per-tx gas admission limit enforced at RPC ingestion and gossip
+- Per-block DA allocation multiplier with configurable minimum
+- Sequencer multiplier validation at startup
+
+**Migration difficulty**: Low
+
+[View full changelog →](./v5.md)
+
+---
+
 ### [v4.2.0](./v4.2.md)
 
 New features and configuration options for node operators.
