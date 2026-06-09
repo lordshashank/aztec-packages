@@ -125,19 +125,27 @@ TEST(BBApiInputValidation, VkWithCorrectSizeAccepted)
 
 TEST(BBApiInputValidation, ChonkVerifyWrongVkSizeReturnsInvalid)
 {
-    auto response = bbapi::ChonkVerify{ .proof = {}, .vk = { 0 } }.execute();
+    bbapi::BBApiRequest request;
+    auto response = bbapi::handle_chonk_verify(request, bbapi::wire::ChonkVerify{ .proof = {}, .vk = { 0 } });
     EXPECT_FALSE(response.valid);
 }
 
 TEST(BBApiInputValidation, ChonkVerifyFromFieldsWrongVkSizeReturnsInvalid)
 {
-    auto response = bbapi::ChonkVerifyFromFields{ .proof = {}, .vk = { 0 } }.execute();
+    bbapi::BBApiRequest request;
+    auto response =
+        bbapi::handle_chonk_verify_from_fields(request, bbapi::wire::ChonkVerifyFromFields{ .proof = {}, .vk = { 0 } });
     EXPECT_FALSE(response.valid);
 }
 
 TEST(BBApiInputValidation, ChonkBatchVerifyWrongVkSizeReturnsInvalid)
 {
-    auto response = bbapi::ChonkBatchVerify{ .proofs = { ChonkProof{} }, .vks = { { 0 } } }.execute();
+    bbapi::BBApiRequest request;
+    auto response = bbapi::handle_chonk_batch_verify(request,
+                                                     bbapi::wire::ChonkBatchVerify{
+                                                         .proofs = { bbapi::wire::ChonkProof{} },
+                                                         .vks = { { 0 } },
+                                                     });
     EXPECT_FALSE(response.valid);
 }
 
