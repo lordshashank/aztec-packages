@@ -92,49 +92,52 @@ describe('builderMeetsNetworkTxGasLimits', () => {
   const manaCheckpointBudget = 10_000_000;
 
   it('meets the floor when configured at the network-minimum multipliers', () => {
-    const { meets } = builderMeetsNetworkTxGasLimits({
+    const { meetsMultipliers, meetsWithCaps } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
       daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
       l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
     });
-    expect(meets).toBe(true);
+    expect(meetsMultipliers).toBe(true);
+    expect(meetsWithCaps).toBe(true);
   });
 
   it('meets the floor when configured more generously', () => {
-    const { meets } = builderMeetsNetworkTxGasLimits({
+    const { meetsMultipliers, meetsWithCaps } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
       daMultiplier: 8,
       l2Multiplier: 8,
     });
-    expect(meets).toBe(true);
+    expect(meetsMultipliers).toBe(true);
+    expect(meetsWithCaps).toBe(true);
   });
 
-  it('falls below the floor when the DA multiplier is under the network minimum', () => {
-    const { meets, networkLimit, builderLimit } = builderMeetsNetworkTxGasLimits({
+  it('fails the multiplier check when the DA multiplier is under the network minimum', () => {
+    const { meetsMultipliers, networkLimit, allocationLimit } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
       daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER - 0.5,
       l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
     });
-    expect(meets).toBe(false);
-    expect(builderLimit.daGas).toBeLessThan(networkLimit.daGas);
+    expect(meetsMultipliers).toBe(false);
+    expect(allocationLimit.daGas).toBeLessThan(networkLimit.daGas);
   });
 
-  it('falls below the floor when the L2 multiplier is under the network minimum', () => {
-    const { meets, networkLimit, builderLimit } = builderMeetsNetworkTxGasLimits({
+  it('fails the multiplier check when the L2 multiplier is under the network minimum', () => {
+    const { meetsMultipliers, networkLimit, allocationLimit } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
       daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
       l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER - 0.5,
     });
-    expect(meets).toBe(false);
-    expect(builderLimit.l2Gas).toBeLessThan(networkLimit.l2Gas);
+    expect(meetsMultipliers).toBe(false);
+    expect(allocationLimit.l2Gas).toBeLessThan(networkLimit.l2Gas);
   });
 
-  it('falls below the floor when an absolute per-block cap is under the network limit', () => {
-    // Multipliers are at/above the minimum, but a low maxDABlockGas still shrinks the builder's grant.
+  it('passes the multiplier check but fails the cap check when an absolute per-block cap is under the network limit', () => {
+    // Multipliers are at/above the minimum (so this is legitimate operator restrictiveness, not a config
+    // error), but a low maxDABlockGas still shrinks the builder's grant below the network admission limit.
     const { networkLimit } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
@@ -148,8 +151,33 @@ describe('builderMeetsNetworkTxGasLimits', () => {
       l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
       daBlockGasCap: networkLimit.daGas - 1,
     });
-    expect(result.meets).toBe(false);
+    expect(result.meetsMultipliers).toBe(true);
+    expect(result.meetsWithCaps).toBe(false);
+    expect(result.allocationLimit.daGas).toBeGreaterThanOrEqual(networkLimit.daGas);
     expect(result.builderLimit.daGas).toBe(networkLimit.daGas - 1);
+  });
+
+  it('passes the multiplier check but fails the cap check for the e2e scenario (tiny l2BlockGasCap)', () => {
+    // Mirrors e2e_sequencer_config "respects maxL2BlockGas": network-minimum multipliers with a single-tx
+    // l2BlockGasCap. The cap is a supported operator knob, so the multiplier check must pass while the cap
+    // check fails — the sequencer warns instead of throwing.
+    const { networkLimit } = builderMeetsNetworkTxGasLimits({
+      maxBlocksPerCheckpoint,
+      manaCheckpointBudget,
+      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+    });
+    const result = builderMeetsNetworkTxGasLimits({
+      maxBlocksPerCheckpoint,
+      manaCheckpointBudget,
+      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      l2BlockGasCap: 777_750,
+    });
+    expect(result.meetsMultipliers).toBe(true);
+    expect(result.meetsWithCaps).toBe(false);
+    expect(result.builderLimit.l2Gas).toBeLessThan(networkLimit.l2Gas);
+    expect(result.builderLimit.l2Gas).toBe(777_750);
   });
 });
 

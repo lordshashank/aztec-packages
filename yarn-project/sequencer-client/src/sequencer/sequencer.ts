@@ -21,7 +21,11 @@ import type {
 import type { Checkpoint, ProposedCheckpointData } from '@aztec/stdlib/checkpoint';
 import type { ChainConfig } from '@aztec/stdlib/config';
 import { getEpochAtSlot } from '@aztec/stdlib/epoch-helpers';
-import { builderMeetsNetworkTxGasLimits } from '@aztec/stdlib/gas';
+import {
+  DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+  DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+  builderMeetsNetworkTxGasLimits,
+} from '@aztec/stdlib/gas';
 import {
   type ResolvedSequencerConfig,
   type SequencerConfig,
@@ -201,31 +205,59 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
   }
 
   /**
-   * Fails startup (and runtime config updates) if this node's configured per-block allocation grants a
-   * single tx less than the network admission limit. A node advertises and admits txs up to the limit
-   * derived from the network-minimum multipliers (see {@link computeNetworkTxGasLimits}); if its builder is
-   * configured below that floor, it would accept txs over RPC/gossip that it can never pack into a block.
-   * Operators may configure a higher (more generous) multiplier, but not a lower one.
+   * Checks this node's configured per-block allocation against the network admission limit. A node
+   * advertises and admits txs up to the limit derived from the network-minimum multipliers (see
+   * {@link computeNetworkTxGasLimits}).
+   *
+   * Fails startup (and runtime config updates) only when the configured per-block allocation *multipliers*
+   * (`perBlockAllocationMultiplier` / `perBlockDAAllocationMultiplier`) are below the network minimums: such
+   * a node would accept txs over RPC/gossip that its builder can never pack into a block regardless of block
+   * size. Operators may configure a higher (more generous) multiplier, but not a lower one.
+   *
+   * When the multipliers meet the floor but an absolute per-block gas cap (`maxDABlockGas` / `maxL2BlockGas`)
+   * shrinks the builder's effective grant below the network limit, this is legitimate operator
+   * restrictiveness — the node simply builds smaller blocks and such txs stay in the pool for other
+   * proposers — so we only log a warning rather than failing startup.
    */
   private assertConfigMeetsNetworkTxLimits(maxBlocksPerCheckpoint: number) {
-    const { meets, networkLimit, builderLimit } = builderMeetsNetworkTxGasLimits({
-      maxBlocksPerCheckpoint,
-      manaCheckpointBudget: this.l1Constants.rollupManaLimit,
-      daMultiplier: this.config.perBlockDAAllocationMultiplier ?? this.config.perBlockAllocationMultiplier,
-      l2Multiplier: this.config.perBlockAllocationMultiplier,
-      daBlockGasCap: this.config.maxDABlockGas,
-      l2BlockGasCap: this.config.maxL2BlockGas,
-    });
+    const { meetsMultipliers, meetsWithCaps, networkLimit, allocationLimit, builderLimit } =
+      builderMeetsNetworkTxGasLimits({
+        maxBlocksPerCheckpoint,
+        manaCheckpointBudget: this.l1Constants.rollupManaLimit,
+        daMultiplier: this.config.perBlockDAAllocationMultiplier ?? this.config.perBlockAllocationMultiplier,
+        l2Multiplier: this.config.perBlockAllocationMultiplier,
+        daBlockGasCap: this.config.maxDABlockGas,
+        l2BlockGasCap: this.config.maxL2BlockGas,
+      });
 
-    if (!meets) {
+    if (!meetsMultipliers) {
       throw new Error(
-        `Sequencer per-block allocation is below the network admission limit: a single tx may be admitted ` +
-          `with up to da:${networkLimit.daGas},l2:${networkLimit.l2Gas} gas, but this node's builder would only ` +
-          `grant da:${builderLimit.daGas},l2:${builderLimit.l2Gas} (perBlockAllocationMultiplier=` +
-          `${this.config.perBlockAllocationMultiplier}, perBlockDAAllocationMultiplier=` +
-          `${this.config.perBlockDAAllocationMultiplier}, maxDABlockGas=${this.config.maxDABlockGas}, ` +
-          `maxL2BlockGas=${this.config.maxL2BlockGas}, maxBlocksPerCheckpoint=${maxBlocksPerCheckpoint}). ` +
-          `Raise the multipliers and/or per-block gas caps to at least the network minimums.`,
+        `Sequencer per-block allocation multipliers are below the network admission limit: a single tx may ` +
+          `be admitted with up to da:${networkLimit.daGas},l2:${networkLimit.l2Gas} gas, but this node's ` +
+          `multipliers only allocate da:${allocationLimit.daGas},l2:${allocationLimit.l2Gas} ` +
+          `(perBlockAllocationMultiplier=${this.config.perBlockAllocationMultiplier}, ` +
+          `perBlockDAAllocationMultiplier=${this.config.perBlockDAAllocationMultiplier}, ` +
+          `maxBlocksPerCheckpoint=${maxBlocksPerCheckpoint}). Raise the multipliers to at least the network ` +
+          `minimums (general=${DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER}, da=` +
+          `${DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER}).`,
+      );
+    }
+
+    if (!meetsWithCaps) {
+      this.log.warn(
+        `Sequencer per-block gas caps shrink the builder's grant below the network admission limit: txs ` +
+          `declaring up to da:${networkLimit.daGas},l2:${networkLimit.l2Gas} gas are admitted over RPC/gossip, ` +
+          `but this node's builder only grants da:${builderLimit.daGas},l2:${builderLimit.l2Gas} per block, so ` +
+          `larger txs will be skipped by this proposer's own blocks and left in the pool for other proposers.`,
+        {
+          networkDaGas: networkLimit.daGas,
+          networkL2Gas: networkLimit.l2Gas,
+          builderDaGas: builderLimit.daGas,
+          builderL2Gas: builderLimit.l2Gas,
+          maxDABlockGas: this.config.maxDABlockGas,
+          maxL2BlockGas: this.config.maxL2BlockGas,
+          maxBlocksPerCheckpoint,
+        },
       );
     }
   }

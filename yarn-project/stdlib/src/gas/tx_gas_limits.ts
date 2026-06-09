@@ -104,10 +104,21 @@ export function getNetworkTxGasLimits(
 }
 
 /**
- * Whether a block builder configured with the given per-block multipliers and absolute per-block gas caps
- * grants a single tx at least the network admission limit (which uses the network-minimum multipliers).
- * Returns `meets: false` when the builder would reject txs the network admits over RPC/gossip — the
- * sequencer fails startup in that case. Returns both limits so callers can report the shortfall.
+ * Compares a block builder's effective per-tx grant against the network admission limit (which uses the
+ * network-minimum multipliers), distinguishing two independent causes of a shortfall:
+ *
+ * - `meetsMultipliers`: whether the multiplier-derived allocation (no absolute caps) reaches the network
+ *   limit. A `false` here is a *configuration error* — the node's `perBlockAllocationMultiplier` /
+ *   `perBlockDAAllocationMultiplier` are below the network minimums, so it would admit txs over RPC/gossip
+ *   that its builder can never pack regardless of block size. The sequencer fails startup in this case.
+ * - `meetsWithCaps`: whether the grant still reaches the network limit after mining in the absolute
+ *   per-block gas caps (`maxDABlockGas` / `maxL2BlockGas`). A `false` here when `meetsMultipliers` is true
+ *   is *legitimate operator restrictiveness*: the node simply builds smaller blocks, leaving such txs in the
+ *   pool for other proposers. It is worth a warning — txs declaring more than the builder grant will be
+ *   skipped by this proposer's own blocks — but not a startup failure.
+ *
+ * Returns the network limit, the multiplier-only `allocationLimit`, and the cap-adjusted `builderLimit` so
+ * callers can report the precise shortfall.
  *
  * @param daBlockGasCap - Absolute per-block DA gas cap the builder enforces (`maxDABlockGas`). The builder
  * mins the multiplier allocation with this (see `CheckpointBuilder.capLimitsByCheckpointBudgets`), so a cap
@@ -121,10 +132,10 @@ export function builderMeetsNetworkTxGasLimits(opts: {
   l2Multiplier: number;
   daBlockGasCap?: number;
   l2BlockGasCap?: number;
-}): { meets: boolean; networkLimit: Gas; builderLimit: Gas } {
+}): { meetsMultipliers: boolean; meetsWithCaps: boolean; networkLimit: Gas; allocationLimit: Gas; builderLimit: Gas } {
   const { maxBlocksPerCheckpoint, manaCheckpointBudget } = opts;
   const networkLimit = computeNetworkTxGasLimits({ maxBlocksPerCheckpoint, manaCheckpointBudget });
-  const allocation = computeNetworkTxGasLimits({
+  const allocationLimit = computeNetworkTxGasLimits({
     maxBlocksPerCheckpoint,
     manaCheckpointBudget,
     daMultiplier: opts.daMultiplier,
@@ -133,11 +144,12 @@ export function builderMeetsNetworkTxGasLimits(opts: {
   // The builder caps each block by the node's absolute per-block gas limits in addition to the multiplier
   // allocation, so a tx is only buildable if it fits under both.
   const builderLimit = new Gas(
-    Math.min(allocation.daGas, opts.daBlockGasCap ?? Infinity),
-    Math.min(allocation.l2Gas, opts.l2BlockGasCap ?? Infinity),
+    Math.min(allocationLimit.daGas, opts.daBlockGasCap ?? Infinity),
+    Math.min(allocationLimit.l2Gas, opts.l2BlockGasCap ?? Infinity),
   );
-  const meets = builderLimit.daGas >= networkLimit.daGas && builderLimit.l2Gas >= networkLimit.l2Gas;
-  return { meets, networkLimit, builderLimit };
+  const meetsMultipliers = allocationLimit.daGas >= networkLimit.daGas && allocationLimit.l2Gas >= networkLimit.l2Gas;
+  const meetsWithCaps = builderLimit.daGas >= networkLimit.daGas && builderLimit.l2Gas >= networkLimit.l2Gas;
+  return { meetsMultipliers, meetsWithCaps, networkLimit, allocationLimit, builderLimit };
 }
 
 /**
