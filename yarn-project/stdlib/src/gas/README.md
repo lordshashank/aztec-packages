@@ -174,17 +174,21 @@ min(per-tx max, ceil(checkpointBudget / blocksPerCheckpoint * minMultiplier))
 
 The per-block share mirrors what a proposer grants the first block of a checkpoint
 (`CheckpointBuilder.capLimitsByCheckpointBudgets`), so a tx declaring this much is packable into a block.
-The network-minimum multipliers are `DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER` (1.2, L2 and tx count) and
-`DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER` (1.5, DA). DA's is higher so a maximal contract class
+The network-minimum multipliers are `MIN_PER_BLOCK_ALLOCATION_MULTIPLIER` (1.2, L2 and tx count) and
+`MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER` (1.5, DA). DA's is higher so a maximal contract class
 registration (~97k DA gas) fits a single block at mainnet geometry (72s slots, 6s blocks → 10 blocks per
 checkpoint).
 
-The DA budget uses `DA_CHECKPOINT_BUDGET_FOR_TXS` (786,176), not the raw
+The DA budget is `getDaCheckpointBudgetForTxs(maxBlocksPerCheckpoint)`, not the raw
 `MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT` (786,432). Blob encoding spends overhead fields that no tx pays DA
 gas for — one checkpoint-end marker field and the per-block block-end fields (7 for the first block, 6 for
-each subsequent block, `blob-lib/src/encoding/block_blob_data.ts`) — so the raw constant is unattainable.
-Admission must net out that overhead on the same basis as the builder's blob-field cap, or a tx near the raw
-limit would be admitted but never buildable.
+each subsequent block, `blob-lib/src/encoding/block_blob_data.ts`) — so the raw constant is unattainable. The
+getter nets out the full overhead for a checkpoint of `maxBlocksPerCheckpoint` blocks: at mainnet geometry
+(10 blocks) that is `(24,576 − 1 − 7 − 9×6) × 32 = 24,514 × 32 = 784,448` DA gas. Subtracting every block's
+overhead (not just the first) keeps admission at or below the builder's first-block blob-field cap at every
+geometry — the builder is the most generous for the first block (it only reserves that block's own block-end
+overhead), so being conservative here is what guarantees admitted ⇒ buildable. Without this netting a tx
+near the raw limit would be admitted but never buildable.
 
 These limits depend on network-wide inputs only (timetable-derived blocks-per-checkpoint, checkpoint
 budgets, the network-minimum multipliers), never on a node's local restrictiveness. Every node always
@@ -227,7 +231,7 @@ The outermost limits, enforced as proposal validity in `validateCheckpointLimits
 | --------------------------------------- | ------------------------------- | ------------- | ----------------------------------------------------------- |
 | `MAX_TX_DA_GAS`                         | 271,200                         | per-tx        | every gas validator (hard ceiling)                          |
 | `MAX_PROCESSABLE_L2_GAS`                | 6,540,000                       | per-tx        | every gas validator (hard ceiling)                          |
-| Network DA admission limit              | min(271,200, ceil(786,176/10×1.5)) = 117,927 | per-tx (relay) | RPC, gossip, pending pool (`GasLimitsValidator`)         |
+| Network DA admission limit              | min(271,200, ceil(784,448/10×1.5)) = 117,668 | per-tx (relay) | RPC, gossip, pending pool (`GasLimitsValidator`)         |
 | Network L2 admission limit              | min(6,540,000, ceil(manaLimit/10×1.2)) | per-tx (relay) | RPC, gossip, pending pool (`GasLimitsValidator`)         |
 | Per-block fair share + caps             | remaining budget / blocks × multiplier, min absolute caps & blob-field cap | per-block | `CheckpointBuilder.capLimitsByCheckpointBudgets`         |
 | `rollupManaLimit`                       | `manaTarget × 2`                | per-checkpoint | `validateCheckpointLimits`                                |

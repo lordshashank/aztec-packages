@@ -22,8 +22,8 @@ import type { Checkpoint, ProposedCheckpointData } from '@aztec/stdlib/checkpoin
 import type { ChainConfig } from '@aztec/stdlib/config';
 import { getEpochAtSlot } from '@aztec/stdlib/epoch-helpers';
 import {
-  DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
-  DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+  MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
+  MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
   builderMeetsNetworkTxGasLimits,
 } from '@aztec/stdlib/gas';
 import {
@@ -238,8 +238,8 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
           `(perBlockAllocationMultiplier=${this.config.perBlockAllocationMultiplier}, ` +
           `perBlockDAAllocationMultiplier=${this.config.perBlockDAAllocationMultiplier}, ` +
           `maxBlocksPerCheckpoint=${maxBlocksPerCheckpoint}). Raise the multipliers to at least the network ` +
-          `minimums (general=${DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER}, da=` +
-          `${DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER}).`,
+          `minimums (general=${MIN_PER_BLOCK_ALLOCATION_MULTIPLIER}, da=` +
+          `${MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER}).`,
       );
     }
 

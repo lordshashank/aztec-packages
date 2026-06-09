@@ -11,18 +11,18 @@ import {
 
 import { buildProposerTimetable } from '../timetable/build_proposer_timetable.js';
 import {
-  DA_CHECKPOINT_BUDGET_FOR_TXS,
-  DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
-  DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+  MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
+  MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
   builderMeetsNetworkTxGasLimits,
   computeNetworkTxGasLimits,
+  getDaCheckpointBudgetForTxs,
   getNetworkTxGasLimits,
 } from './tx_gas_limits.js';
 
 describe('computeNetworkTxGasLimits', () => {
   it('caps DA gas at the per-block allocation when it is below the per-tx blob ceiling', () => {
     const gas = computeNetworkTxGasLimits({ maxBlocksPerCheckpoint: 10 });
-    expect(gas.daGas).toBe(Math.ceil((DA_CHECKPOINT_BUDGET_FOR_TXS / 10) * DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER));
+    expect(gas.daGas).toBe(Math.ceil((getDaCheckpointBudgetForTxs(10) / 10) * MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER));
     expect(gas.daGas).toBeLessThan(MAX_TX_DA_GAS);
   });
 
@@ -37,7 +37,7 @@ describe('computeNetworkTxGasLimits', () => {
       const firstBlockBlobFieldCap = Math.ceil(
         ((BLOBS_PER_CHECKPOINT * FIELDS_PER_BLOB - NUM_CHECKPOINT_END_MARKER_FIELDS - getNumBlockEndBlobFields(true)) /
           b) *
-          DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+          MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
       );
       expect(admittedBlobFields).toBeLessThanOrEqual(firstBlockBlobFieldCap);
     }
@@ -58,10 +58,7 @@ describe('computeNetworkTxGasLimits', () => {
     const manaCheckpointBudget = 10_000_000;
     const gas = computeNetworkTxGasLimits({ maxBlocksPerCheckpoint: 10, manaCheckpointBudget });
     expect(gas.l2Gas).toBe(
-      Math.min(
-        MAX_PROCESSABLE_L2_GAS,
-        Math.ceil((manaCheckpointBudget / 10) * DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER),
-      ),
+      Math.min(MAX_PROCESSABLE_L2_GAS, Math.ceil((manaCheckpointBudget / 10) * MIN_PER_BLOCK_ALLOCATION_MULTIPLIER)),
     );
   });
 });
@@ -98,8 +95,8 @@ describe('builderMeetsNetworkTxGasLimits', () => {
     const { meetsMultipliers, meetsWithCaps } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
-      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
-      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      daMultiplier: MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
     });
     expect(meetsMultipliers).toBe(true);
     expect(meetsWithCaps).toBe(true);
@@ -120,8 +117,8 @@ describe('builderMeetsNetworkTxGasLimits', () => {
     const { meetsMultipliers, networkLimit, allocationLimit } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
-      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER - 0.5,
-      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      daMultiplier: MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER - 0.5,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
     });
     expect(meetsMultipliers).toBe(false);
     expect(allocationLimit.daGas).toBeLessThan(networkLimit.daGas);
@@ -131,8 +128,8 @@ describe('builderMeetsNetworkTxGasLimits', () => {
     const { meetsMultipliers, networkLimit, allocationLimit } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
-      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
-      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER - 0.5,
+      daMultiplier: MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER - 0.5,
     });
     expect(meetsMultipliers).toBe(false);
     expect(allocationLimit.l2Gas).toBeLessThan(networkLimit.l2Gas);
@@ -144,14 +141,14 @@ describe('builderMeetsNetworkTxGasLimits', () => {
     const { networkLimit } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
-      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
-      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      daMultiplier: MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
     });
     const result = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
-      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
-      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      daMultiplier: MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
       daBlockGasCap: networkLimit.daGas - 1,
     });
     expect(result.meetsMultipliers).toBe(true);
@@ -167,14 +164,14 @@ describe('builderMeetsNetworkTxGasLimits', () => {
     const { networkLimit } = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
-      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
-      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      daMultiplier: MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
     });
     const result = builderMeetsNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
       manaCheckpointBudget,
-      daMultiplier: DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
-      l2Multiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      daMultiplier: MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
       l2BlockGasCap: 777_750,
     });
     expect(result.meetsMultipliers).toBe(true);
@@ -206,7 +203,7 @@ describe('v5 mainnet geometry (72s slots / 6s blocks → 10 blocks per checkpoin
     // Red: the general 1.2 multiplier does not.
     const generalMultiplierDaGas = computeNetworkTxGasLimits({
       maxBlocksPerCheckpoint,
-      daMultiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
+      daMultiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
     }).daGas;
     expect(generalMultiplierDaGas).toBeLessThan(largestDeployDaGas);
   });
