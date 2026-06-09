@@ -1,4 +1,11 @@
-import { MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT, MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from '@aztec/constants';
+import { NUM_CHECKPOINT_END_MARKER_FIELDS, NUM_FIRST_BLOCK_END_BLOB_FIELDS } from '@aztec/blob-lib/encoding';
+import {
+  BLOBS_PER_CHECKPOINT,
+  DA_GAS_PER_FIELD,
+  FIELDS_PER_BLOB,
+  MAX_PROCESSABLE_L2_GAS,
+  MAX_TX_DA_GAS,
+} from '@aztec/constants';
 
 import {
   type ProposerTimetableConfig,
@@ -26,6 +33,21 @@ export const DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER = 1.2;
 export const DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER = 1.5;
 
 /**
+ * The DA gas budget actually available to tx data within a checkpoint. This is the raw blob capacity
+ * (`BLOBS_PER_CHECKPOINT * FIELDS_PER_BLOB * DA_GAS_PER_FIELD`) minus the fields the blob encoding
+ * reserves for overhead that no tx pays DA gas for: one checkpoint-end marker field and the first-block
+ * block-end fields (7 fields; subsequent blocks add 6 each).
+ *
+ * This must use the same basis as `CheckpointBuilder.capLimitsByCheckpointBudgets`'s blob-field cap so
+ * that a tx admitted under the network DA limit always fits the first block's blob-field cap. It is
+ * slightly optimistic for later blocks (each adds 6 more block-end fields), but the per-block fair-share
+ * division accounts for that.
+ */
+export const DA_CHECKPOINT_BUDGET_FOR_TXS =
+  (BLOBS_PER_CHECKPOINT * FIELDS_PER_BLOB - NUM_CHECKPOINT_END_MARKER_FIELDS - NUM_FIRST_BLOCK_END_BLOB_FIELDS) *
+  DA_GAS_PER_FIELD;
+
+/**
  * Computes the maximum gas a single tx may declare on a network: the smaller of the per-tx protocol
  * maximum and the per-block allocation a proposer grants to the first block of a checkpoint. The per-block
  * allocation mirrors `CheckpointBuilder.capLimitsByCheckpointBudgets`
@@ -39,6 +61,10 @@ export const DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER = 1.5;
  * time but cannot define what the network considers a valid tx for relay. The same value is advertised by
  * `getNodeInfo` and enforced by the RPC/gossip/pool gas validators.
  *
+ * The DA budget defaults to {@link DA_CHECKPOINT_BUDGET_FOR_TXS} — the raw blob capacity net of encoding
+ * overhead — rather than the raw `MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT`, so the admission limit is
+ * consistent with the builder's blob-field cap.
+ *
  * @param manaCheckpointBudget - L2 (mana) budget per checkpoint (`rollupManaLimit`). When omitted (e.g. a
  * client that does not know the chain's mana limit), the L2 limit falls back to the per-tx maximum.
  */
@@ -50,7 +76,7 @@ export function computeNetworkTxGasLimits(opts: {
   l2Multiplier?: number;
 }): Gas {
   const blocks = Math.max(1, opts.maxBlocksPerCheckpoint);
-  const daBudget = opts.daCheckpointBudget ?? MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT;
+  const daBudget = opts.daCheckpointBudget ?? DA_CHECKPOINT_BUDGET_FOR_TXS;
   const daMultiplier = opts.daMultiplier ?? DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER;
   const l2Multiplier = opts.l2Multiplier ?? DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER;
 

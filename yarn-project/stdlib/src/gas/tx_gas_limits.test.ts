@@ -1,7 +1,9 @@
+import { NUM_CHECKPOINT_END_MARKER_FIELDS, getNumBlockEndBlobFields } from '@aztec/blob-lib/encoding';
 import {
+  BLOBS_PER_CHECKPOINT,
   CONTRACT_CLASS_LOG_SIZE_IN_FIELDS,
   DA_GAS_PER_FIELD,
-  MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT,
+  FIELDS_PER_BLOB,
   MAX_PROCESSABLE_L2_GAS,
   MAX_TX_DA_GAS,
   TX_DA_GAS_OVERHEAD,
@@ -9,6 +11,7 @@ import {
 
 import { getDefaultMaxBlocksPerCheckpoint } from '../timetable/build_proposer_timetable.js';
 import {
+  DA_CHECKPOINT_BUDGET_FOR_TXS,
   DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
   DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
   builderMeetsNetworkTxGasLimits,
@@ -20,10 +23,25 @@ import {
 describe('computeNetworkTxGasLimits', () => {
   it('caps DA gas at the per-block allocation when it is below the per-tx blob ceiling', () => {
     const gas = computeNetworkTxGasLimits({ maxBlocksPerCheckpoint: 10 });
-    expect(gas.daGas).toBe(
-      Math.ceil((MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT / 10) * DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER),
-    );
+    expect(gas.daGas).toBe(Math.ceil((DA_CHECKPOINT_BUDGET_FOR_TXS / 10) * DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER));
     expect(gas.daGas).toBeLessThan(MAX_TX_DA_GAS);
+  });
+
+  it('admitted tx always fits the first-block blob-field cap across all valid geometries', () => {
+    // Guards against the mismatch where the admission DA limit uses the raw checkpoint capacity but the
+    // builder's blob-field cap uses the overhead-adjusted capacity, causing txs to be admitted but never
+    // buildable at certain blocks-per-checkpoint geometries.
+    for (let b = 1; b <= 24; b++) {
+      const admittedBlobFields = Math.floor(
+        computeNetworkTxGasLimits({ maxBlocksPerCheckpoint: b }).daGas / DA_GAS_PER_FIELD,
+      );
+      const firstBlockBlobFieldCap = Math.ceil(
+        ((BLOBS_PER_CHECKPOINT * FIELDS_PER_BLOB - NUM_CHECKPOINT_END_MARKER_FIELDS - getNumBlockEndBlobFields(true)) /
+          b) *
+          DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
+      );
+      expect(admittedBlobFields).toBeLessThanOrEqual(firstBlockBlobFieldCap);
+    }
   });
 
   it('caps DA gas at the per-tx blob ceiling in single-block mode', () => {
