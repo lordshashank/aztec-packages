@@ -335,6 +335,12 @@ template <class Params_> struct alignas(32) field {
     BB_INLINE constexpr field to_montgomery_form() const noexcept;
     BB_INLINE constexpr field from_montgomery_form() const noexcept;
 
+    // Compatibility aliases for code backported from origin/next. In this (older) field
+    // representation `from_montgomery_form()` already returns the canonical value in [0, p)
+    // (it ends with `reduce_once()`), so the `_reduced` variants are simple aliases.
+    BB_INLINE constexpr field from_montgomery_form_reduced() const noexcept { return from_montgomery_form(); }
+    BB_INLINE constexpr void self_from_montgomery_form_reduced() & noexcept { self_from_montgomery_form(); }
+
     BB_INLINE constexpr field sqr() const noexcept;
     BB_INLINE constexpr void self_sqr() & noexcept;
 
@@ -496,6 +502,17 @@ template <class Params_> struct alignas(32) field {
         field q2_lo{ q2.data[0], q2.data[1], q2.data[2], q2.data[3] };
 
         field t1 = (q2_lo - q1_lo).reduce_once();
+
+        // (Backported from origin/next) k2 (= t1) can be slightly negative for ~2^{-64} of inputs.
+        // When negative, t1 = k2 + r is 254 bits (upper limbs nonzero).
+        // Fix: decrement c1 by 1, equivalent to adding |b1| to k2.
+        // This shifts k2 by +|b1| (~127 bits, now positive) and k1 by -a1 (~64 bits),
+        // keeping both within 128 bits. The decomposition identity k = k1 - k2*lambda (mod r)
+        // is preserved (both halves are recomputed consistently below).
+        if (t1.data[2] != 0 || t1.data[3] != 0) {
+            t1 = (t1 + endo_minus_b1).reduce_once();
+        }
+
         field beta = cube_root_of_unity();
         field t2 = (t1 * beta + input).reduce_once();
         return {

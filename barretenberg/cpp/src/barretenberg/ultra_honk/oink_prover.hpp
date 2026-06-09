@@ -72,7 +72,9 @@ template <IsUltraOrMegaHonk Flavor> class OinkProver {
     void execute_grand_product_computation_round();
     void commit_to_masking_poly();
     SubrelationSeparator generate_alpha_round();
-    Flavor::Commitment commit_to_witness_polynomial(Polynomial<FF>& polynomial, const std::string& label);
+    Flavor::Commitment commit_to_witness_polynomial(Polynomial<FF>& polynomial,
+                                                    const std::string& label,
+                                                    bool has_duplicates_hint = false);
 };
 
 using MegaOinkProver = OinkProver<MegaFlavor>;

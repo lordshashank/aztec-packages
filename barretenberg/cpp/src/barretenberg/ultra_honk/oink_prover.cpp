@@ -86,9 +86,12 @@ template <IsUltraOrMegaHonk Flavor> void OinkProver<Flavor>::execute_wire_commit
     // Commit to the first three wire polynomials
     // We only commit to the fourth wire polynomial after adding memory records
 
-    batch.add_to_batch(prover_instance->polynomials.w_l, commitment_labels.w_l, /*mask?*/ Flavor::HasZK);
-    batch.add_to_batch(prover_instance->polynomials.w_r, commitment_labels.w_r, /*mask?*/ Flavor::HasZK);
-    batch.add_to_batch(prover_instance->polynomials.w_o, commitment_labels.w_o, /*mask?*/ Flavor::HasZK);
+    batch.add_to_batch(
+        prover_instance->polynomials.w_l, commitment_labels.w_l, /*mask?*/ Flavor::HasZK, /*has_duplicates_hint=*/true);
+    batch.add_to_batch(
+        prover_instance->polynomials.w_r, commitment_labels.w_r, /*mask?*/ Flavor::HasZK, /*has_duplicates_hint=*/true);
+    batch.add_to_batch(
+        prover_instance->polynomials.w_o, commitment_labels.w_o, /*mask?*/ Flavor::HasZK, /*has_duplicates_hint=*/true);
 
     if constexpr (IsMegaFlavor<Flavor>) {
 
@@ -164,8 +167,10 @@ template <IsUltraOrMegaHonk Flavor> void OinkProver<Flavor>::execute_sorted_list
                        /*mask?*/ Flavor::HasZK);
     batch.add_to_batch(
         prover_instance->polynomials.lookup_read_tags, commitment_labels.lookup_read_tags, /*mask?*/ Flavor::HasZK);
-    batch.add_to_batch(
-        prover_instance->polynomials.w_4, domain_separator + commitment_labels.w_4, /*mask?*/ Flavor::HasZK);
+    batch.add_to_batch(prover_instance->polynomials.w_4,
+                       domain_separator + commitment_labels.w_4,
+                       /*mask?*/ Flavor::HasZK,
+                       /*has_duplicates_hint=*/true);
     auto computed_commitments = batch.commit_and_send_to_verifier(transcript);
 
     prover_instance->commitments.lookup_read_counts = computed_commitments[0];
@@ -230,8 +235,9 @@ template <IsUltraOrMegaHonk Flavor> void OinkProver<Flavor>::execute_grand_produ
 
     {
         BB_BENCH_NAME("COMMIT::z_perm");
-        prover_instance->commitments.z_perm =
-            commit_to_witness_polynomial(prover_instance->polynomials.z_perm, commitment_labels.z_perm);
+        // has_duplicates_hint set for Z_PERM (empty row = duplicate Z value), mirroring origin/next
+        prover_instance->commitments.z_perm = commit_to_witness_polynomial(
+            prover_instance->polynomials.z_perm, commitment_labels.z_perm, /*has_duplicates_hint=*/true);
     }
 }
 
@@ -253,7 +259,8 @@ template <IsUltraOrMegaHonk Flavor> typename Flavor::SubrelationSeparator OinkPr
  */
 template <IsUltraOrMegaHonk Flavor>
 Flavor::Commitment OinkProver<Flavor>::commit_to_witness_polynomial(Polynomial<FF>& polynomial,
-                                                                    const std::string& label)
+                                                                    const std::string& label,
+                                                                    bool has_duplicates_hint)
 {
     BB_BENCH_NAME("OinkProver::commit_to_witness_polynomial");
     // Mask the polynomial when proving in zero-knowledge
@@ -263,7 +270,7 @@ Flavor::Commitment OinkProver<Flavor>::commit_to_witness_polynomial(Polynomial<F
 
     typename Flavor::Commitment commitment;
 
-    commitment = prover_instance->commitment_key.commit(polynomial);
+    commitment = prover_instance->commitment_key.commit(polynomial, has_duplicates_hint);
     // Send the commitment to the verifier
     transcript->send_to_verifier(domain_separator + label, commitment);
 
