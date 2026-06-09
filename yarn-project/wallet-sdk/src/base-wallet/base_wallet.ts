@@ -167,11 +167,12 @@ export abstract class BaseWallet implements Wallet {
   }
 
   /**
-   * Gas limits a single tx may declare on this wallet's network, used as the default when sending without
-   * explicit limits or gas estimation. Read once from the node (a wallet talks to a single network for its
-   * lifetime).
+   * Returns the maximum gas limits a single transaction may declare on this wallet's network (the
+   * node-advertised `txsLimits.gas`). Used as the default gas limits when sending a transaction without
+   * gas estimation. Read once from the node and cached for the wallet's lifetime, since a wallet talks to
+   * a single network.
    */
-  private async getMaxTxGasLimits(): Promise<Gas> {
+  public async getMaxTxGasLimits(): Promise<Gas> {
     if (!this.nodeInfoPromise) {
       this.nodeInfoPromise = this.aztecNode.getNodeInfo();
     }
