@@ -9,14 +9,13 @@ import {
   TX_DA_GAS_OVERHEAD,
 } from '@aztec/constants';
 
-import { getDefaultMaxBlocksPerCheckpoint } from '../timetable/build_proposer_timetable.js';
+import { buildProposerTimetable } from '../timetable/build_proposer_timetable.js';
 import {
   DA_CHECKPOINT_BUDGET_FOR_TXS,
   DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
   DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER,
   builderMeetsNetworkTxGasLimits,
   computeNetworkTxGasLimits,
-  getDefaultNetworkTxGasLimits,
   getNetworkTxGasLimits,
 } from './tx_gas_limits.js';
 
@@ -77,8 +76,12 @@ describe('getNetworkTxGasLimits', () => {
 
   it('derives the limit from config + L1 constants using the network-minimum multipliers', () => {
     const gas = getNetworkTxGasLimits({ blockDurationMs: 6000 }, l1Constants);
+    const maxBlocksPerCheckpoint = buildProposerTimetable(
+      { blockDurationMs: 6000 },
+      l1Constants,
+    ).getMaxBlocksPerCheckpoint();
     const expected = computeNetworkTxGasLimits({
-      maxBlocksPerCheckpoint: getDefaultMaxBlocksPerCheckpoint(),
+      maxBlocksPerCheckpoint,
       manaCheckpointBudget: l1Constants.rollupManaLimit,
     });
     expect(gas.daGas).toBe(expected.daGas);
@@ -181,23 +184,28 @@ describe('builderMeetsNetworkTxGasLimits', () => {
   });
 });
 
-describe('mainnet defaults', () => {
+describe('v5 mainnet geometry (72s slots / 6s blocks → 10 blocks per checkpoint)', () => {
   // Largest tx we want to support: a maximal contract class registration, dominated by its contract class
   // log (content + contract-address field) plus the fixed tx overhead. Deploy-side nullifiers add a handful
   // more fields, so this is a lower bound on the true largest deploy.
   const largestDeployDaGas = (CONTRACT_CLASS_LOG_SIZE_IN_FIELDS + 1) * DA_GAS_PER_FIELD + TX_DA_GAS_OVERHEAD;
+  const maxBlocksPerCheckpoint = 10;
 
-  it('derives 10 blocks per checkpoint for 72s slots / 6s blocks', () => {
-    expect(getDefaultMaxBlocksPerCheckpoint()).toBe(10);
+  it('the timetable derives 10 blocks per checkpoint', () => {
+    const blocks = buildProposerTimetable(
+      { blockDurationMs: 6000 },
+      { l1GenesisTime: 0n, slotDuration: 72, ethereumSlotDuration: 12 },
+    ).getMaxBlocksPerCheckpoint();
+    expect(blocks).toBe(maxBlocksPerCheckpoint);
   });
 
   it('fits the largest contract class deploy with the DA multiplier, but not with the general multiplier', () => {
     // Green: the 1.5 DA multiplier leaves room for the largest deploy.
-    expect(getDefaultNetworkTxGasLimits().daGas).toBeGreaterThanOrEqual(largestDeployDaGas);
+    expect(computeNetworkTxGasLimits({ maxBlocksPerCheckpoint }).daGas).toBeGreaterThanOrEqual(largestDeployDaGas);
 
     // Red: the general 1.2 multiplier does not.
     const generalMultiplierDaGas = computeNetworkTxGasLimits({
-      maxBlocksPerCheckpoint: getDefaultMaxBlocksPerCheckpoint(),
+      maxBlocksPerCheckpoint,
       daMultiplier: DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER,
     }).daGas;
     expect(generalMultiplierDaGas).toBeLessThan(largestDeployDaGas);

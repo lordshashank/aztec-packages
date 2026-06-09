@@ -86,7 +86,12 @@ describe('BaseWallet', () => {
 
     node.getPredictedMinFees.mockResolvedValue([new GasFees(2, 2)]);
     node.getCurrentMinFees.mockResolvedValue(new GasFees(2, 2));
-    node.getNodeInfo.mockResolvedValue({ ...mock<NodeInfo>(), l1ChainId: 1, rollupVersion: 1 });
+    node.getNodeInfo.mockResolvedValue({
+      ...mock<NodeInfo>(),
+      l1ChainId: 1,
+      rollupVersion: 1,
+      txsLimits: { gas: { daGas: 117_668, l2Gas: 6_540_000 } },
+    });
     pxe.getSyncedBlockHeader.mockResolvedValue(BlockHeader.empty());
 
     wallet.mockAccount.createTxExecutionRequest.mockResolvedValue(mock());
@@ -278,7 +283,12 @@ describe('BaseWallet', () => {
     // Mock dependencies for completeFeeOptions and createTxExecutionRequestFromPayloadAndFee
     node.getPredictedMinFees.mockResolvedValue([new GasFees(2, 2)]);
     node.getCurrentMinFees.mockResolvedValue(new GasFees(2, 2));
-    node.getNodeInfo.mockResolvedValue({ ...mock<NodeInfo>(), l1ChainId: 1, rollupVersion: 1 });
+    node.getNodeInfo.mockResolvedValue({
+      ...mock<NodeInfo>(),
+      l1ChainId: 1,
+      rollupVersion: 1,
+      txsLimits: { gas: { daGas: 117_668, l2Gas: 6_540_000 } },
+    });
     pxe.getSyncedBlockHeader.mockResolvedValue(BlockHeader.empty());
     wallet.mockAccount.createTxExecutionRequest.mockResolvedValue(mock());
     pxe.proveTx.mockResolvedValue(provenTx);

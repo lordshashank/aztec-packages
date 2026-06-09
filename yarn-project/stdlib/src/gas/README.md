@@ -187,9 +187,9 @@ Admission must net out that overhead on the same basis as the builder's blob-fie
 limit would be admitted but never buildable.
 
 These limits depend on network-wide inputs only (timetable-derived blocks-per-checkpoint, checkpoint
-budgets, the network-minimum multipliers), never on a node's local restrictiveness. They are advertised in
-`NodeInfo.txsLimits`, consumed by wallets for fallback gas (`GasSettings.fallback`, which falls back to
-mainnet defaults via `getDefaultNetworkTxGasLimits` for nodes predating the `txsLimits` field), and enforced
+budgets, the network-minimum multipliers), never on a node's local restrictiveness. Every node always
+advertises them in `NodeInfo.txsLimits` (a required field); wallets read it and pass `txsLimits.gas` to
+`GasSettings.fallback` as the default gas limits when sending without explicit limits, and they are enforced
 by `GasLimitsValidator` (clamped to the per-tx protocol maxima) at three points: RPC tx acceptance
 (`aztec-node/src/aztec-node/server.ts`), gossip validation (`p2p/src/services/libp2p/libp2p_service.ts`),
 and pending-pool admission (`p2p/src/client/factory.ts`). They are deliberately *not* enforced at reqresp or

@@ -48,7 +48,7 @@ import {
   getContractClassFromArtifact,
 } from '@aztec/stdlib/contract';
 import { SimulationError } from '@aztec/stdlib/errors';
-import { Gas, GasFees, GasSettings, ManaUsageEstimate, getDefaultNetworkTxGasLimits } from '@aztec/stdlib/gas';
+import { Gas, GasFees, GasSettings, ManaUsageEstimate } from '@aztec/stdlib/gas';
 import {
   computeSiloedPrivateInitializationNullifier,
   computeSiloedPublicInitializationNullifier,
@@ -169,14 +169,14 @@ export abstract class BaseWallet implements Wallet {
   /**
    * Gas limits a single tx may declare on this wallet's network, used as the default when sending without
    * explicit limits or gas estimation. Read once from the node (a wallet talks to a single network for its
-   * lifetime); falls back to the mainnet defaults for nodes that predate the `txsLimits` field.
+   * lifetime).
    */
-  private async getDefaultTxGasLimits(): Promise<Gas> {
+  private async getMaxTxGasLimits(): Promise<Gas> {
     if (!this.nodeInfoPromise) {
       this.nodeInfoPromise = this.aztecNode.getNodeInfo();
     }
     const { txsLimits } = await this.nodeInfoPromise;
-    return txsLimits ? new Gas(txsLimits.gas.daGas, txsLimits.gas.l2Gas) : getDefaultNetworkTxGasLimits();
+    return new Gas(txsLimits.gas.daGas, txsLimits.gas.l2Gas);
   }
 
   protected async createTxExecutionRequestFromPayloadAndFee(
@@ -291,7 +291,7 @@ export abstract class BaseWallet implements Wallet {
       ? GasSettings.forEstimation(gasSettingsOverrides)
       : GasSettings.fallback({
           ...gasSettingsOverrides,
-          gasLimits: gasSettingsOverrides.gasLimits ?? (await this.getDefaultTxGasLimits()),
+          gasLimits: gasSettingsOverrides.gasLimits ?? (await this.getMaxTxGasLimits()),
         });
     this.log.debug(`Using L2 gas settings`, fullGasSettings);
     return {

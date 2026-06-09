@@ -259,7 +259,9 @@ export class CLIFeeArgs {
   async toUserFeeOptions(node: AztecNode, wallet: Wallet, from: AztecAddress): Promise<ParsedFeeOptions> {
     const minFees = await this.getMinFees(node);
     const maxFeesPerGas = minFees.mul(1 + MIN_FEE_PADDING);
-    const gasSettings = GasSettings.fallback({ ...this.gasSettings, maxFeesPerGas });
+    // TODO: route the network's per-tx limits through the wallet instead of fetching them directly here.
+    const gasLimits = this.gasSettings.gasLimits ?? Gas.from((await node.getNodeInfo()).txsLimits.gas);
+    const gasSettings = GasSettings.fallback({ ...this.gasSettings, gasLimits, maxFeesPerGas });
     const paymentMethod = await this.paymentMethod(wallet, from, gasSettings);
     return {
       paymentMethod,

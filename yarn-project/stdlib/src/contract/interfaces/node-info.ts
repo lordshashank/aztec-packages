@@ -27,8 +27,8 @@ export interface NodeInfo {
   protocolContractAddresses: ProtocolContractAddresses;
   /** Whether the node requires real proofs for transaction submission. */
   realProofs: boolean;
-  /** Limits a single tx may declare on this network. Clients use this to set fallback gas limits. Absent on nodes predating this field. */
-  txsLimits?: TxsLimits;
+  /** Limits a single tx may declare on this network. Clients rely on this to set fallback gas limits. */
+  txsLimits: TxsLimits;
 }
 
 export const NodeInfoSchema: ZodFor<NodeInfo> = z
@@ -40,10 +40,8 @@ export const NodeInfoSchema: ZodFor<NodeInfo> = z
     l1ContractAddresses: L1ContractAddressesSchema,
     protocolContractAddresses: ProtocolContractAddressesSchema,
     realProofs: z.boolean(),
-    txsLimits: z
-      .object({
-        gas: z.object({ daGas: z.number().int().nonnegative(), l2Gas: z.number().int().nonnegative() }),
-      })
-      .optional(),
+    txsLimits: z.object({
+      gas: z.object({ daGas: z.number().int().nonnegative(), l2Gas: z.number().int().nonnegative() }),
+    }),
   })
   .transform(obj => ({ enr: undefined, ...obj }));

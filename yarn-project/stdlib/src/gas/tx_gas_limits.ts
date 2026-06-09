@@ -7,11 +7,7 @@ import {
   MAX_TX_DA_GAS,
 } from '@aztec/constants';
 
-import {
-  type ProposerTimetableConfig,
-  buildProposerTimetable,
-  getDefaultMaxBlocksPerCheckpoint,
-} from '../timetable/build_proposer_timetable.js';
+import { type ProposerTimetableConfig, buildProposerTimetable } from '../timetable/build_proposer_timetable.js';
 import type { SlotTimingConstants } from '../timetable/consensus_timetable.js';
 import { Gas } from './gas.js';
 
@@ -150,13 +146,4 @@ export function builderMeetsNetworkTxGasLimits(opts: {
   const meetsMultipliers = allocationLimit.daGas >= networkLimit.daGas && allocationLimit.l2Gas >= networkLimit.l2Gas;
   const meetsWithCaps = builderLimit.daGas >= networkLimit.daGas && builderLimit.l2Gas >= networkLimit.l2Gas;
   return { meetsMultipliers, meetsWithCaps, networkLimit, allocationLimit, builderLimit };
-}
-
-/**
- * Network tx gas limits assuming the mainnet defaults (72s slots, 6s blocks → 10 blocks per checkpoint).
- * Used by clients talking to a node that predates the `txsLimits` RPC field, and as the default for
- * {@link GasSettings.fallback}. The mana budget is unknown client-side, so L2 falls back to the per-tx max.
- */
-export function getDefaultNetworkTxGasLimits(): Gas {
-  return computeNetworkTxGasLimits({ maxBlocksPerCheckpoint: getDefaultMaxBlocksPerCheckpoint() });
 }

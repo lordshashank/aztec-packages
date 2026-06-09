@@ -38,7 +38,13 @@ type MockTx = Awaited<ReturnType<typeof mockTx>>;
 
 // Default maxFeesPerGas used by mockTx is GasFees(10, 10).
 const DEFAULT_MAX_FEES_PER_GAS = new GasFees(10, 10);
-const DEFAULT_TX_FEE_LIMIT = GasSettings.fallback({ maxFeesPerGas: DEFAULT_MAX_FEES_PER_GAS }).getFeeLimit().toBigInt();
+const DEFAULT_GAS_LIMITS = new Gas(MAX_TX_DA_GAS, MAX_PROCESSABLE_L2_GAS);
+const DEFAULT_TX_FEE_LIMIT = GasSettings.fallback({
+  gasLimits: DEFAULT_GAS_LIMITS,
+  maxFeesPerGas: DEFAULT_MAX_FEES_PER_GAS,
+})
+  .getFeeLimit()
+  .toBigInt();
 
 /** A validator that accepts all transactions. Used in tests that don't need validation. */
 const alwaysValidValidator: TxValidator<TxMetaData> = {
@@ -4373,6 +4379,7 @@ describe('TxPoolV2', () => {
       // Default gas limits are ~1e7 each, so with maxFees of 1e12 we get ~1e19 fee limit
       const highFeeTx = await mockTx(4, { numberOfNonRevertiblePublicCallRequests: 1 });
       highFeeTx.data.constants.txContext.gasSettings = GasSettings.fallback({
+        gasLimits: DEFAULT_GAS_LIMITS,
         maxFeesPerGas: new GasFees(1e12, 1e12),
       });
 
@@ -5802,7 +5809,7 @@ describe('TxPoolV2', () => {
 
     const makeTxWithMaxFees = async (seed: number, maxFeesPerGas: GasFees) => {
       const tx = await mockTx(seed, { numberOfNonRevertiblePublicCallRequests: 1 });
-      tx.data.constants.txContext.gasSettings = GasSettings.fallback({ maxFeesPerGas });
+      tx.data.constants.txContext.gasSettings = GasSettings.fallback({ gasLimits: DEFAULT_GAS_LIMITS, maxFeesPerGas });
       return tx;
     };
 
@@ -5886,6 +5893,7 @@ describe('TxPoolV2', () => {
         maxPriorityFeesPerGas: new GasFees(1, 1),
       });
       tx.data.constants.txContext.gasSettings = GasSettings.fallback({
+        gasLimits: DEFAULT_GAS_LIMITS,
         maxFeesPerGas,
         maxPriorityFeesPerGas: new GasFees(1, 1),
       });

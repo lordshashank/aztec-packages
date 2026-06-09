@@ -26,9 +26,11 @@ import {
   MAX_PRIVATE_CALL_STACK_LENGTH_PER_CALL,
   MAX_PRIVATE_LOGS_PER_CALL,
   MAX_PRIVATE_LOGS_PER_TX,
+  MAX_PROCESSABLE_L2_GAS,
   MAX_PROTOCOL_CONTRACTS,
   MAX_PUBLIC_DATA_UPDATE_REQUESTS_PER_TX,
   MAX_TOTAL_PUBLIC_DATA_UPDATE_REQUESTS_PER_TX,
+  MAX_TX_DA_GAS,
   NESTED_RECURSIVE_ROLLUP_HONK_PROOF_LENGTH,
   NOTE_HASH_SUBTREE_ROOT_SIBLING_PATH_LENGTH,
   NULLIFIER_SUBTREE_ROOT_SIBLING_PATH_LENGTH,
@@ -232,7 +234,10 @@ export function makeTxContext(seed: number = 1): TxContext {
  * Creates a default instance of gas settings. No seed value is used to ensure we allocate a sensible amount of gas for testing.
  */
 export function makeGasSettings() {
-  return GasSettings.fallback({ maxFeesPerGas: new GasFees(10, 10) });
+  return GasSettings.fallback({
+    gasLimits: new Gas(MAX_TX_DA_GAS, MAX_PROCESSABLE_L2_GAS),
+    maxFeesPerGas: new GasFees(10, 10),
+  });
 }
 
 /**

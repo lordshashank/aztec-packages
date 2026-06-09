@@ -21,13 +21,6 @@ export type ProposerTimetableConfig = {
   enforceTimeTable?: boolean;
 };
 
-/** Mainnet default Aztec slot duration in seconds. Used to derive client-side defaults when a node predates the network-info RPC. */
-export const DEFAULT_MAINNET_AZTEC_SLOT_DURATION = 72;
-/** Mainnet default Ethereum slot duration in seconds. */
-export const DEFAULT_MAINNET_ETHEREUM_SLOT_DURATION = 12;
-/** Mainnet default block duration in milliseconds. */
-export const DEFAULT_MAINNET_BLOCK_DURATION_MS = 6000;
-
 /**
  * Builds the proposer timetable from a sequencer/p2p config and the slot-timing protocol constants,
  * applying the shared stdlib budget defaults. Single source of truth shared by the sequencer, the p2p
@@ -47,20 +40,4 @@ export function buildProposerTimetable(
     checkpointProposalSyncGrace: config.checkpointProposalSyncGraceSeconds,
     enforce: config.enforceTimeTable ?? true,
   });
-}
-
-/**
- * Blocks-per-checkpoint a client should assume when talking to a node that predates the network-info RPC.
- * Derived from the mainnet defaults (72s slots, 6s blocks) through the same timetable used by proposers,
- * so there is no separate hardcoded count to drift.
- */
-export function getDefaultMaxBlocksPerCheckpoint(): number {
-  return buildProposerTimetable(
-    { blockDurationMs: DEFAULT_MAINNET_BLOCK_DURATION_MS },
-    {
-      l1GenesisTime: 0n,
-      slotDuration: DEFAULT_MAINNET_AZTEC_SLOT_DURATION,
-      ethereumSlotDuration: DEFAULT_MAINNET_ETHEREUM_SLOT_DURATION,
-    },
-  ).getMaxBlocksPerCheckpoint();
 }

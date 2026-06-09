@@ -7,11 +7,10 @@ import { z } from 'zod';
 
 import { Gas, GasDimensions } from './gas.js';
 import { GasFees } from './gas_fees.js';
-import { getDefaultNetworkTxGasLimits } from './tx_gas_limits.js';
 
-// NOTE: these are legacy/fixture constants. `GasSettings.fallback` no longer uses them — it derives its
-// defaults from {@link getDefaultNetworkTxGasLimits} (or a node's advertised `txsLimits`) and a teardown split of the
-// effective total. They remain for test fixtures that need fixed arbitrary gas values.
+// NOTE: these are legacy/fixture constants. `GasSettings.fallback` no longer uses them — it takes the
+// effective `gasLimits` from its caller (typically a node's advertised `txsLimits.gas`) and derives the
+// teardown split from that total. They remain for test fixtures that need fixed arbitrary gas values.
 
 /** Arbitrary DA gas value (assumes 4 blocks per checkpoint). Used by test fixtures; not the fallback default. */
 export const APPROXIMATE_MAX_DA_GAS_PER_BLOCK = Math.floor(MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT / 4);
@@ -111,24 +110,23 @@ export class GasSettings {
 
   /**
    * Fills in gas limits high enough for transactions to be included in most cases.
-   * When no explicit `gasLimits` are given, defaults to the most a single tx may declare on the network
-   * (`min(per-tx max, per-block allocation)`): callers fed a node's `txsLimits.gas` pass it here, otherwise
-   * the mainnet defaults are assumed (see {@link getDefaultNetworkTxGasLimits}). Since teardown gas is reserved from
-   * gasLimits during private execution (see gas_meter.nr), the effective gas available for app logic is
-   * gasLimits - teardownGasLimits - privateOverhead; the teardown default is derived from the effective
-   * total so it always stays below it.
+   * Callers must supply `gasLimits` — typically the most a single tx may declare on the network
+   * (`min(per-tx max, per-block allocation)`), i.e. a node's advertised `txsLimits.gas`. Since teardown gas
+   * is reserved from gasLimits during private execution (see gas_meter.nr), the effective gas available for
+   * app logic is gasLimits - teardownGasLimits - privateOverhead; the teardown default is derived from the
+   * effective total so it always stays below it.
    * These values won't work if:
    *  - Teardown consumes more than the arbitrarily assigned fallback limits
    *  - The rest of the transaction consumes more than the remaining gas after teardown
    *  - The DA gas limit is too low for the transaction, while still within the checkpoint limit
    */
   static fallback(overrides: {
-    gasLimits?: Gas;
+    gasLimits: Gas;
     teardownGasLimits?: Gas;
     maxFeesPerGas: GasFees;
     maxPriorityFeesPerGas?: GasFees;
   }) {
-    const gasLimits = overrides.gasLimits ?? getDefaultNetworkTxGasLimits();
+    const gasLimits = overrides.gasLimits;
     const teardownGasLimits =
       overrides.teardownGasLimits ?? new Gas(Math.floor(gasLimits.daGas / 2), Math.floor(gasLimits.l2Gas / 8));
     return GasSettings.from({
