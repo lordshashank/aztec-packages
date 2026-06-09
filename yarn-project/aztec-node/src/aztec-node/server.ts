@@ -165,7 +165,6 @@ import {
 import type { SlashingProtectionDatabase } from '@aztec/validator-ha-signer/types';
 import { createWorldState, createWorldStateSynchronizer } from '@aztec/world-state';
 
-import { join } from 'node:path';
 import { createPublicClient } from 'viem';
 
 import { createSentinel } from '../sentinel/factory.js';
