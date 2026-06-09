@@ -152,6 +152,7 @@ export interface ${serviceOptions} {
 ${supportsShm ? "  napiPath?: string;\n  clientId?: number;\n" : ""}}
 
 let instanceCounter = 0;
+const DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
 class SpawnedBackend implements IpcClientAsync {
   private constructor(
@@ -192,7 +193,16 @@ class SpawnedBackend implements IpcClientAsync {
       child.on('exit', () => resolve());
     });
 
-    const client = await connectClient(child, ipcPath, transport, options);
+    const childReadyFailure = new Promise<never>((_, reject) => {
+      child.once('error', reject);
+      child.once('exit', (code, signal) => {
+        reject(
+          new Error('${this.opts.binaryName} exited before IPC connection was ready (code=' + code + ', signal=' + signal + ')'),
+        );
+      });
+    });
+
+    const client = await Promise.race([connectClient(child, ipcPath, transport, options), childReadyFailure]);
     return new SpawnedBackend(child, client, ipcPath, transport, exitPromise);
   }
 
@@ -223,7 +233,7 @@ async function connectClient(
   transport: ${serviceTransport},
   options: ${serviceOptions},
 ): Promise<IpcClientAsync> {
-  const timeoutMs = options.connectTimeoutMs ?? 5000;
+  const timeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
 
