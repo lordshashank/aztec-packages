@@ -20,8 +20,8 @@ import {
   type L2BlockSource,
   L2BlockStream,
   type L2BlockStreamEvent,
-  type L2Tips,
   type L2TipsStore,
+  type LocalL2Tips,
 } from '@aztec/stdlib/block';
 import type { ContractDataSource } from '@aztec/stdlib/contract';
 import { getTimestampForSlot } from '@aztec/stdlib/epoch-helpers';
@@ -152,7 +152,7 @@ export class P2PClient extends WithTracer implements P2P {
     this.p2pService.updateConfig(config);
   }
 
-  public getL2Tips(): Promise<L2Tips> {
+  public getL2Tips(): Promise<LocalL2Tips> {
     return this.l2Tips.getL2Tips();
   }
 
@@ -743,18 +743,9 @@ export class P2PClient extends WithTracer implements P2P {
 
   /** Checks if the slot has changed and calls prepareForSlot if so. */
   private async maybeCallPrepareForSlot(): Promise<void> {
-    // If we have a proposed checkpoint available, we want to prepare the target slot - otherwise we prepare the current slot
-    const l2Tips = await this.l2Tips.getL2Tips();
-    const hasProposedCheckpoint = l2Tips.proposedCheckpoint.checkpoint.number > l2Tips.checkpointed.checkpoint.number;
-
-    let slot;
-    if (hasProposedCheckpoint) {
-      const { targetSlot } = this.epochCache.getTargetAndNextSlot();
-      slot = targetSlot;
-    } else {
-      const { currentSlot } = this.epochCache.getCurrentAndNextSlot();
-      slot = currentSlot;
-    }
+    // The local tips store never leads the checkpointed tip, so target-slot preparation (gated on a
+    // proposed checkpoint ahead of checkpointed) was already unreachable here; always prepare the current slot.
+    const { currentSlot: slot } = this.epochCache.getCurrentAndNextSlot();
     if (slot <= this.lastSlotProcessed) {
       return;
     }
