@@ -225,12 +225,13 @@ describe('Validator factory functions', () => {
         DoubleSpendTxValidator.name,
         DataTxValidator.name,
         ContractInstanceTxValidator.name,
+        GasLimitsValidator.name,
         GasTxValidator.name,
         TxProofValidator.name,
       ]);
     });
 
-    it('excludes gas validator when fee enforcement is skipped', () => {
+    it('excludes the fee validator but keeps gas-limits validation when fee enforcement is skipped', () => {
       const validator = createTxValidatorForAcceptingTxsOverRPC(db, contractSource, proofVerifier, {
         l1ChainId: 1,
         rollupVersion: 2,
@@ -244,6 +245,8 @@ describe('Validator factory functions', () => {
 
       const aggregate = validator as AggregateTxValidator<unknown>;
       const names = getValidatorNames(aggregate);
+      // Declared gas-limit admission is not fee enforcement, so it stays even with fees skipped.
+      expect(names).toContain(GasLimitsValidator.name);
       expect(names).not.toContain(GasTxValidator.name);
       expect(names).toContain(TxProofValidator.name);
     });

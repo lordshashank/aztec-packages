@@ -63,6 +63,13 @@ describe('computeNetworkTxGasLimits', () => {
   });
 });
 
+describe('getDaCheckpointBudgetForTxs', () => {
+  it('clamps to zero for absurd geometries instead of going negative', () => {
+    expect(getDaCheckpointBudgetForTxs(10_000)).toBe(0);
+    expect(computeNetworkTxGasLimits({ maxBlocksPerCheckpoint: 10_000 }).daGas).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe('getNetworkTxGasLimits', () => {
   const l1Constants = {
     l1GenesisTime: 0n,

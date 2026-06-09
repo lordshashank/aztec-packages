@@ -156,29 +156,48 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
     this.updateConfig(config);
   }
 
-  /** Updates sequencer config by the defined values and updates the timetable */
+  /**
+   * Updates sequencer config by the defined values and rebuilds the timetable.
+   *
+   * The merged config is validated against a candidate before being committed: {@link buildTimetable} may
+   * reject the candidate (invalid timing geometry, or per-block allocation multipliers below the network
+   * minimums). On rejection we leave `this.config` and `this.timetable` untouched and rethrow, so a bad update
+   * never leaves the sequencer running with a rejected config and a stale timetable.
+   */
   public updateConfig(config: Partial<SequencerConfig>) {
     const filteredConfig = pickFromSchema(config, SequencerConfigSchema);
+    const candidate = merge(this.config, filteredConfig);
+    let timetable: ProposerTimetable;
+    try {
+      timetable = this.buildTimetable(candidate);
+    } catch (err) {
+      this.log.warn(`Rejecting sequencer config update: ${(err as Error).message}`, {
+        rejectedConfig: omit(filteredConfig, 'txPublicSetupAllowListExtend'),
+      });
+      throw err;
+    }
+    this.config = candidate;
+    this.timetable = timetable;
     this.log.info(`Updated sequencer config`, omit(filteredConfig, 'txPublicSetupAllowListExtend'));
-    this.config = merge(this.config, filteredConfig);
-    this.timetable = this.buildTimetable();
   }
 
   /**
-   * Builds the proposer timetable from the current config and L1 constants. The fast local/e2e profile and
+   * Builds the proposer timetable from the given config and L1 constants. The fast local/e2e profile and
    * budget clamping happen inside {@link ProposerTimetable}; here we only fill the operational budgets the
    * config leaves unset with the shared `DEFAULT_*` values (the config layer owns the defaults).
+   *
+   * Throws if the timing geometry is invalid or the per-block allocation multipliers are below the network
+   * minimums; callers must treat a throw as a rejected config and not commit it.
    */
-  private buildTimetable(): ProposerTimetable {
+  private buildTimetable(config: ResolvedSequencerConfig): ProposerTimetable {
     const timetable = new ProposerTimetable({
       l1Constants: this.l1Constants,
-      blockDuration: this.config.blockDurationMs / 1000,
-      minBlockDuration: this.config.minBlockDuration ?? DEFAULT_MIN_BLOCK_DURATION,
-      p2pPropagationTime: this.config.attestationPropagationTime ?? DEFAULT_P2P_PROPAGATION_TIME,
-      checkpointProposalPrepareTime:
-        this.config.checkpointProposalPrepareTime ?? DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
+      blockDuration: config.blockDurationMs / 1000,
+      minBlockDuration: config.minBlockDuration ?? DEFAULT_MIN_BLOCK_DURATION,
+      p2pPropagationTime: config.attestationPropagationTime ?? DEFAULT_P2P_PROPAGATION_TIME,
+      checkpointProposalPrepareTime: config.checkpointProposalPrepareTime ?? DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
       checkpointProposalInitTime: DEFAULT_CHECKPOINT_PROPOSAL_INIT_TIME,
-      checkpointProposalSyncGrace: this.config.checkpointProposalSyncGraceSeconds,
+      checkpointProposalSyncGrace: config.checkpointProposalSyncGraceSeconds,
     });
 
     const maxNumberOfBlocks = timetable.getMaxBlocksPerCheckpoint();
@@ -199,7 +218,7 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
       );
     }
 
-    this.assertConfigMeetsNetworkTxLimits(maxNumberOfBlocks);
+    this.assertConfigMeetsNetworkTxLimits(config, maxNumberOfBlocks);
 
     return timetable;
   }
@@ -219,15 +238,15 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
    * restrictiveness — the node simply builds smaller blocks and such txs stay in the pool for other
    * proposers — so we only log a warning rather than failing startup.
    */
-  private assertConfigMeetsNetworkTxLimits(maxBlocksPerCheckpoint: number) {
+  private assertConfigMeetsNetworkTxLimits(config: ResolvedSequencerConfig, maxBlocksPerCheckpoint: number) {
     const { meetsMultipliers, meetsWithCaps, networkLimit, allocationLimit, builderLimit } =
       builderMeetsNetworkTxGasLimits({
         maxBlocksPerCheckpoint,
         manaCheckpointBudget: this.l1Constants.rollupManaLimit,
-        daMultiplier: this.config.perBlockDAAllocationMultiplier ?? this.config.perBlockAllocationMultiplier,
-        l2Multiplier: this.config.perBlockAllocationMultiplier,
-        daBlockGasCap: this.config.maxDABlockGas,
-        l2BlockGasCap: this.config.maxL2BlockGas,
+        daMultiplier: config.perBlockDAAllocationMultiplier ?? config.perBlockAllocationMultiplier,
+        l2Multiplier: config.perBlockAllocationMultiplier,
+        daBlockGasCap: config.maxDABlockGas,
+        l2BlockGasCap: config.maxL2BlockGas,
       });
 
     if (!meetsMultipliers) {
@@ -235,8 +254,8 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
         `Sequencer per-block allocation multipliers are below the network admission limit: a single tx may ` +
           `be admitted with up to da:${networkLimit.daGas},l2:${networkLimit.l2Gas} gas, but this node's ` +
           `multipliers only allocate da:${allocationLimit.daGas},l2:${allocationLimit.l2Gas} ` +
-          `(perBlockAllocationMultiplier=${this.config.perBlockAllocationMultiplier}, ` +
-          `perBlockDAAllocationMultiplier=${this.config.perBlockDAAllocationMultiplier}, ` +
+          `(perBlockAllocationMultiplier=${config.perBlockAllocationMultiplier}, ` +
+          `perBlockDAAllocationMultiplier=${config.perBlockDAAllocationMultiplier}, ` +
           `maxBlocksPerCheckpoint=${maxBlocksPerCheckpoint}). Raise the multipliers to at least the network ` +
           `minimums (general=${MIN_PER_BLOCK_ALLOCATION_MULTIPLIER}, da=` +
           `${MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER}).`,
@@ -254,8 +273,8 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
           networkL2Gas: networkLimit.l2Gas,
           builderDaGas: builderLimit.daGas,
           builderL2Gas: builderLimit.l2Gas,
-          maxDABlockGas: this.config.maxDABlockGas,
-          maxL2BlockGas: this.config.maxL2BlockGas,
+          maxDABlockGas: config.maxDABlockGas,
+          maxL2BlockGas: config.maxL2BlockGas,
           maxBlocksPerCheckpoint,
         },
       );

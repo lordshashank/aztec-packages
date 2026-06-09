@@ -1,3 +1,4 @@
+import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from '@aztec/constants';
 import { Gas } from '@aztec/stdlib/gas';
 import { mockSimulatedTx, mockTxForRollup } from '@aztec/stdlib/testing';
 import type { TxSimulationResult } from '@aztec/stdlib/tx';
@@ -88,6 +89,33 @@ describe('getGasLimits', () => {
     expect(() => getGasLimits(txSimulationResult, tightLimits, 0)).toThrow(
       'Transaction consumes 150 DA gas but the network only admits transactions declaring up to 140 DA gas',
     );
+  });
+
+  it('clamps caller-supplied limits above the protocol maxima down to the protocol maxima', () => {
+    // A caller may pass an unclamped maxTxGasLimits above the per-tx protocol maxima; the function must
+    // defensively clamp to them so the declared limits never exceed what the protocol allows.
+    const aboveProtocolMaxima = Gas.from({ daGas: MAX_TX_DA_GAS * 2, l2Gas: MAX_PROCESSABLE_L2_GAS * 2 });
+
+    // Usage above the protocol maximum is still rejected even though it is below the caller-supplied limit.
+    txSimulationResult.publicOutput!.gasUsed = {
+      totalGas: Gas.from({ daGas: MAX_TX_DA_GAS + 1, l2Gas: 280 }),
+      billedGas: Gas.from({ daGas: MAX_TX_DA_GAS + 11, l2Gas: 290 }),
+      teardownGas: Gas.from({ daGas: 10, l2Gas: 20 }),
+      publicGas: Gas.from({ daGas: 50, l2Gas: 200 }),
+    };
+    expect(() => getGasLimits(txSimulationResult, aboveProtocolMaxima, 0)).toThrow(
+      `Transaction consumes ${MAX_TX_DA_GAS + 1} DA gas but the network only admits transactions declaring up to ${MAX_TX_DA_GAS} DA gas`,
+    );
+
+    // Usage at the protocol maximum pads up against the protocol maximum, clamping the padded limit to it.
+    txSimulationResult.publicOutput!.gasUsed = {
+      totalGas: Gas.from({ daGas: MAX_TX_DA_GAS, l2Gas: MAX_PROCESSABLE_L2_GAS }),
+      billedGas: Gas.from({ daGas: MAX_TX_DA_GAS, l2Gas: MAX_PROCESSABLE_L2_GAS }),
+      teardownGas: Gas.from({ daGas: 10, l2Gas: 20 }),
+      publicGas: Gas.from({ daGas: 50, l2Gas: 200 }),
+    };
+    const { gasLimits } = getGasLimits(txSimulationResult, aboveProtocolMaxima, 1);
+    expect(gasLimits).toEqual(Gas.from({ daGas: MAX_TX_DA_GAS, l2Gas: MAX_PROCESSABLE_L2_GAS }));
   });
 
   it('throws if simulated l2 gas exceeds the network admission limit', () => {

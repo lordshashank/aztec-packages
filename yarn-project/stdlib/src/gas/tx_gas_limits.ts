@@ -53,11 +53,15 @@ export const MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER = 1.5;
  */
 export function getDaCheckpointBudgetForTxs(maxBlocksPerCheckpoint: number): number {
   const blocks = Math.max(1, maxBlocksPerCheckpoint);
-  const fields =
+  // Clamp at zero: for absurd geometries (blocks greater than ~4094) the per-block overhead alone exceeds the
+  // raw blob capacity, which would otherwise yield a negative advertised DA budget.
+  const fields = Math.max(
+    0,
     BLOBS_PER_CHECKPOINT * FIELDS_PER_BLOB -
-    NUM_CHECKPOINT_END_MARKER_FIELDS -
-    NUM_FIRST_BLOCK_END_BLOB_FIELDS -
-    (blocks - 1) * NUM_BLOCK_END_BLOB_FIELDS;
+      NUM_CHECKPOINT_END_MARKER_FIELDS -
+      NUM_FIRST_BLOCK_END_BLOB_FIELDS -
+      (blocks - 1) * NUM_BLOCK_END_BLOB_FIELDS,
+  );
   return fields * DA_GAS_PER_FIELD;
 }
 

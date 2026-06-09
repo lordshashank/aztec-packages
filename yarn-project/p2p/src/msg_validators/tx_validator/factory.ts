@@ -335,14 +335,15 @@ export function createTxValidatorForAcceptingTxsOverRPC(
     new DoubleSpendTxValidator(new NullifierCache(db), bindings),
     new DataTxValidator(bindings),
     new ContractInstanceTxValidator(bindings),
+    // Declared gas-limit admission is not fee enforcement, so it always runs even when fees are skipped. The
+    // fee-balance check below stays behind `skipFeeEnforcement`. GasTxValidator is constructed without the
+    // limit opts so it does not re-run this same check.
+    new GasLimitsValidator<Tx>({ maxTxL2Gas, maxTxDAGas, bindings }),
   ];
 
   if (!skipFeeEnforcement) {
     validators.push(
-      new GasTxValidator(new DatabasePublicStateSource(db), ProtocolContractAddress.FeeJuice, gasFees, bindings, {
-        maxTxL2Gas,
-        maxTxDAGas,
-      }),
+      new GasTxValidator(new DatabasePublicStateSource(db), ProtocolContractAddress.FeeJuice, gasFees, bindings),
     );
   }
 
