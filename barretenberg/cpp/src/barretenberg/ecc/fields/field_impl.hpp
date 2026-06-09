@@ -35,6 +35,16 @@ template <class T> constexpr field<T> field<T>::operator*(const field& other) co
 {
     if constexpr (BBERG_NO_ASM || (T::modulus_3 >= 0x4000000000000000ULL) ||
                   (T::modulus_1 == 0 && T::modulus_2 == 0 && T::modulus_3 == 0)) {
+#if BBERG_ARM64_ASM
+        // Apple arm64: hand-written assembly for 4-limb moduli satisfying the "no-carry" CIOS
+        // condition (top limb < 2^62). Bit-identical to montgomery_mul.
+        if constexpr ((T::modulus_3 < 0x4000000000000000ULL) &&
+                      !(T::modulus_1 == 0 && T::modulus_2 == 0 && T::modulus_3 == 0)) {
+            if (!std::is_constant_evaluated() && !(arm64_known_constant(*this) && arm64_known_constant(other))) {
+                return asm_montgomery_mul_arm64(*this, other);
+            }
+        }
+#endif
         // >= 255-bits or <= 64-bits.
         return montgomery_mul(other);
     } else {
@@ -70,6 +80,15 @@ template <class T> constexpr field<T> field<T>::sqr() const noexcept
 {
     if constexpr (BBERG_NO_ASM || (T::modulus_3 >= 0x4000000000000000ULL) ||
                   (T::modulus_1 == 0 && T::modulus_2 == 0 && T::modulus_3 == 0)) {
+#if BBERG_ARM64_ASM
+        // Apple arm64: hand-written assembly squaring (see operator* above for conditions).
+        if constexpr ((T::modulus_3 < 0x4000000000000000ULL) &&
+                      !(T::modulus_1 == 0 && T::modulus_2 == 0 && T::modulus_3 == 0)) {
+            if (!std::is_constant_evaluated() && !arm64_known_constant(*this)) {
+                return asm_montgomery_sqr_arm64(*this);
+            }
+        }
+#endif
         return montgomery_square();
     } else {
         if (std::is_constant_evaluated()) {
@@ -83,6 +102,16 @@ template <class T> constexpr void field<T>::self_sqr() & noexcept
 {
     if constexpr (BBERG_NO_ASM || (T::modulus_3 >= 0x4000000000000000ULL) ||
                   (T::modulus_1 == 0 && T::modulus_2 == 0 && T::modulus_3 == 0)) {
+#if BBERG_ARM64_ASM
+        // Apple arm64: hand-written assembly squaring (see operator* above for conditions).
+        if constexpr ((T::modulus_3 < 0x4000000000000000ULL) &&
+                      !(T::modulus_1 == 0 && T::modulus_2 == 0 && T::modulus_3 == 0)) {
+            if (!std::is_constant_evaluated() && !arm64_known_constant(*this)) {
+                *this = asm_montgomery_sqr_arm64(*this);
+                return;
+            }
+        }
+#endif
         *this = montgomery_square();
     } else {
         if (std::is_constant_evaluated()) {

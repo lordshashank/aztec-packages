@@ -12,5 +12,6 @@
  *        declarations header) Spectialized definitions are in "field_impl_generic.hpp" and "field_impl_x64.hpp"
  *        (which include "field_impl.hpp")
  */
+#include "./field_impl_arm64.hpp"
 #include "./field_impl_generic.hpp"
 #include "./field_impl_x64.hpp"
