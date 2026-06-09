@@ -142,6 +142,7 @@ function buildProposerTimetable(
     checkpointProposalPrepareTime: config.checkpointProposalPrepareTime ?? DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
     checkpointProposalInitTime: DEFAULT_CHECKPOINT_PROPOSAL_INIT_TIME,
     checkpointProposalSyncGrace: config.checkpointProposalSyncGraceSeconds,
+    maxBlocksPerCheckpoint: config.maxBlocksPerCheckpoint,
   });
 }
 

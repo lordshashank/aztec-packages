@@ -19,7 +19,7 @@ import type {
   ValidateCheckpointResult,
 } from '@aztec/stdlib/block';
 import type { Checkpoint, ProposedCheckpointData } from '@aztec/stdlib/checkpoint';
-import type { ChainConfig } from '@aztec/stdlib/config';
+import { type ChainConfig, MIN_PER_BLOCK_ALLOCATION_MULTIPLIER } from '@aztec/stdlib/config';
 import { getEpochAtSlot } from '@aztec/stdlib/epoch-helpers';
 import {
   type ResolvedSequencerConfig,
@@ -154,6 +154,15 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
   /** Updates sequencer config by the defined values and updates the timetable */
   public updateConfig(config: Partial<SequencerConfig>) {
     const filteredConfig = pickFromSchema(config, SequencerConfigSchema);
+    if (
+      filteredConfig.perBlockAllocationMultiplier !== undefined &&
+      filteredConfig.perBlockAllocationMultiplier < MIN_PER_BLOCK_ALLOCATION_MULTIPLIER
+    ) {
+      throw new Error(
+        `perBlockAllocationMultiplier (${filteredConfig.perBlockAllocationMultiplier}) is below the network minimum ` +
+          `${MIN_PER_BLOCK_ALLOCATION_MULTIPLIER}: such a node would admit transactions it can never pack into a block.`,
+      );
+    }
     this.log.info(`Updated sequencer config`, omit(filteredConfig, 'txPublicSetupAllowListExtend'));
     this.config = merge(this.config, filteredConfig);
     this.timetable = this.buildTimetable();
@@ -174,6 +183,7 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
         this.config.checkpointProposalPrepareTime ?? DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
       checkpointProposalInitTime: DEFAULT_CHECKPOINT_PROPOSAL_INIT_TIME,
       checkpointProposalSyncGrace: this.config.checkpointProposalSyncGraceSeconds,
+      maxBlocksPerCheckpoint: this.config.maxBlocksPerCheckpoint,
     });
 
     const maxNumberOfBlocks = timetable.getMaxBlocksPerCheckpoint();
@@ -187,11 +197,11 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
       maxNumberOfBlocks,
     });
 
-    if (maxNumberOfBlocks < 1) {
-      throw new Error(
-        `Invalid timing configuration: derived ${maxNumberOfBlocks} blocks per checkpoint for slot duration ` +
-          `${timetable.aztecSlotDuration}s and block duration ${timetable.blockDuration}s.`,
-      );
+    if (timetable.isClampedByLocalBudgets()) {
+      this.log.warn(`Network maxBlocksPerCheckpoint clamped down by local operational budgets`, {
+        networkMaxBlocksPerCheckpoint: this.config.maxBlocksPerCheckpoint,
+        locallyAchievableBlocksPerCheckpoint: timetable.locallyAchievableBlocksPerCheckpoint,
+      });
     }
 
     return timetable;
