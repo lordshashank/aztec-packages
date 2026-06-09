@@ -117,11 +117,7 @@ import {
 } from '@aztec/stdlib/interfaces/server';
 import type { DebugLogStore, LogResult, PrivateLogsQuery, PublicLogsQuery } from '@aztec/stdlib/logs';
 import { InMemoryDebugLogStore, NullDebugLogStore } from '@aztec/stdlib/logs';
-import {
-  InboxLeaf,
-  type L1ToL2MessageSource,
-  type L2ToL1MembershipWitness,
-} from '@aztec/stdlib/messaging';
+import { InboxLeaf, type L1ToL2MessageSource, type L2ToL1MembershipWitness } from '@aztec/stdlib/messaging';
 import type { Offense } from '@aztec/stdlib/slashing';
 import { MIN_EXECUTION_TIME } from '@aztec/stdlib/timetable';
 import type { NullifierLeafPreimage, PublicDataTreeLeafPreimage } from '@aztec/stdlib/trees';
