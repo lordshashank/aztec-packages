@@ -96,7 +96,7 @@ template <IsUltraOrMegaHonk Flavor> void ProverInstance_<Flavor>::allocate_selec
 }
 
 template <IsUltraOrMegaHonk Flavor>
-void ProverInstance_<Flavor>::allocate_table_lookup_polynomials(const Circuit& circuit)
+void ProverInstance_<Flavor>::allocate_table_lookup_polynomials(const Circuit& circuit, const size_t lookup_block_end)
 {
     BB_BENCH_NAME("allocate_table_lookup_and_lookup_read_polynomials");
 
@@ -115,8 +115,8 @@ void ProverInstance_<Flavor>::allocate_table_lookup_polynomials(const Circuit& c
     polynomials.lookup_read_tags = Polynomial(counts_and_tags_size, dyadic_size());
 
     // Lookup inverses: used in the log-derivative lookup argument
-    // Must cover both the lookup gate block (where reads occur) and the table data itself
-    const size_t lookup_block_end = circuit.blocks.lookup.trace_offset() + circuit.blocks.lookup.size();
+    // Must cover both the lookup gate block (where reads occur, the extent of which is passed in by the caller since
+    // the block data may have been released by the time this runs) and the table data itself
     const size_t lookup_inverses_end = std::max(lookup_block_end, tables_size);
 
     const size_t lookup_inverses_size = (Flavor::HasZK ? dyadic_size() : lookup_inverses_end);

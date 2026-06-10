@@ -18,54 +18,16 @@
 namespace bb {
 
 template <class Flavor>
-void TraceToPolynomials<Flavor>::populate(Builder& builder,
-                                          typename Flavor::ProverPolynomials& polynomials,
-                                          bool consume_builder)
+std::vector<CyclicPermutation> TraceToPolynomials<Flavor>::populate_wires_and_selectors(
+    Builder& builder, ProverPolynomials& polynomials, bool consume_builder)
 {
 
-    BB_BENCH_NAME("trace populate");
+    BB_BENCH_NAME("construct_trace_data");
 
     if constexpr (IsMegaFlavor<Flavor>) {
         // Mega needs the builder's blocks (ecc op) and variables (databus) beyond this point; don't consume.
         consume_builder = false;
     }
-
-    auto copy_cycles = populate_wires_and_selectors_and_compute_copy_cycles(builder, polynomials, consume_builder);
-    mem_cp("wires+selectors populated, copy cycles computed");
-
-    if (consume_builder) {
-        // The wire values now live in the polynomials and the copy cycles have been computed: the witness values
-        // and the copy-constraint index bookkeeping in the builder are no longer needed.
-        builder.release_wire_population_data();
-        mem_cp("builder witness/copy-constraint data released");
-    }
-
-    if constexpr (IsMegaFlavor<Flavor>) {
-        BB_BENCH_NAME("add_ecc_op_wires_to_prover_instance");
-
-        add_ecc_op_wires_to_prover_instance(builder, polynomials);
-    }
-
-    // Compute the permutation argument polynomials (sigma/id) and add them to proving key
-    {
-        BB_BENCH_NAME("compute_permutation_argument_polynomials");
-
-        compute_permutation_argument_polynomials<Flavor>(builder, polynomials, copy_cycles);
-    }
-    mem_cp("permutation argument polynomials computed");
-
-    if (consume_builder) {
-        // Sigma/id polynomials are computed; the tag/tau data is no longer needed.
-        builder.release_permutation_data();
-    }
-}
-
-template <class Flavor>
-std::vector<CyclicPermutation> TraceToPolynomials<Flavor>::populate_wires_and_selectors_and_compute_copy_cycles(
-    Builder& builder, ProverPolynomials& polynomials, bool consume_builder)
-{
-
-    BB_BENCH_NAME("construct_trace_data");
 
     std::vector<CyclicPermutation> copy_cycles;
     copy_cycles.resize(builder.get_num_variables()); // at most one copy cycle per variable
@@ -113,6 +75,18 @@ std::vector<CyclicPermutation> TraceToPolynomials<Flavor>::populate_wires_and_se
             // can be reused by the copy-cycle/permutation computations rather than growing the peak.
             block.clear_gate_data();
         }
+    }
+
+    if constexpr (IsMegaFlavor<Flavor>) {
+        BB_BENCH_NAME("add_ecc_op_wires_to_prover_instance");
+
+        add_ecc_op_wires_to_prover_instance(builder, polynomials);
+    }
+
+    if (consume_builder) {
+        // The wire values now live in the polynomials and the copy cycles have been computed: the witness values
+        // and the copy-constraint index bookkeeping in the builder are no longer needed.
+        builder.release_wire_population_data();
     }
 
     return copy_cycles;

@@ -147,7 +147,18 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
             }
         }
 
-        vinfo("allocating polynomials object in prover instance...");
+        // Capture block-extent/public-input metadata before populating the trace: when the circuit is consumed, the
+        // block data is released during population.
+        metadata.num_public_inputs = circuit.blocks.pub_inputs.size();
+        metadata.pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
+        const size_t lookup_block_end =
+            static_cast<size_t>(circuit.blocks.lookup.trace_offset()) + circuit.blocks.lookup.size();
+
+        // The polynomials are allocated in stages, interleaved with the population steps that consume the
+        // corresponding circuit data: this way, when the circuit is consumed, the memory of circuit data that has
+        // already been transferred into polynomials can be reused for subsequent allocations instead of growing the
+        // peak (the builder and the full set of polynomials never coexist).
+        vinfo("allocating wire and selector polynomials...");
         {
             BB_BENCH_NAME("allocating polynomials");
 
@@ -160,20 +171,43 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
             allocate_wires();
             mem_cp("allocated wires");
 
-            allocate_permutation_argument_polynomials();
-            mem_cp("allocated sigma/id");
-
             allocate_selectors(circuit);
             mem_cp("allocated selectors");
-
-            allocate_table_lookup_polynomials(circuit);
-            mem_cp("allocated table polys");
-
-            allocate_lagrange_polynomials();
 
             if constexpr (IsMegaFlavor<Flavor>) {
                 allocate_ecc_op_polynomials(circuit);
             }
+        }
+
+        // Populate the wire and selector polynomials and compute the copy cycles; under consume_circuit this
+        // progressively releases the builder's gate data and witness values.
+        vinfo("populating trace...");
+        {
+            std::vector<CyclicPermutation> copy_cycles =
+                Trace::populate_wires_and_selectors(circuit, polynomials, consume_circuit);
+            mem_cp("wires+selectors populated, copy cycles computed (builder gate data released)");
+
+            allocate_permutation_argument_polynomials();
+            mem_cp("allocated sigma/id");
+
+            // Compute the permutation argument polynomials (sigma/id) and add them to proving key
+            {
+                BB_BENCH_NAME("compute_permutation_argument_polynomials");
+
+                compute_permutation_argument_polynomials<Flavor>(circuit, polynomials, copy_cycles);
+            }
+            if (consume_circuit) {
+                // Sigma/id polynomials are computed; the tag/tau data is no longer needed.
+                circuit.release_permutation_data();
+            }
+        }
+        mem_cp("permutation argument polynomials computed, copy cycles freed");
+
+        {
+            BB_BENCH_NAME("allocating table/lagrange polynomials");
+
+            allocate_table_lookup_polynomials(circuit, lookup_block_end);
+            allocate_lagrange_polynomials();
             if constexpr (HasDataBus<Flavor>) {
                 allocate_databus_polynomials(circuit);
             }
@@ -181,16 +215,7 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
             // Set the shifted polynomials now that all of the to_be_shifted polynomials are defined.
             polynomials.set_shifted();
         }
-
-        // Capture public-input metadata before populating the trace: when the circuit is consumed, the pub_inputs
-        // block data is released during population.
-        metadata.num_public_inputs = circuit.blocks.pub_inputs.size();
-        metadata.pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
-
-        // Construct and add to proving key the wire, selector and copy constraint polynomials
-        vinfo("populating trace...");
-        Trace::populate(circuit, polynomials, consume_circuit);
-        mem_cp("trace populated");
+        mem_cp("allocated table polys");
 
         {
             BB_BENCH_NAME("constructing prover instance after trace populate");
@@ -260,7 +285,7 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
 
     void allocate_selectors(const Circuit&);
 
-    void allocate_table_lookup_polynomials(const Circuit&);
+    void allocate_table_lookup_polynomials(const Circuit&, size_t lookup_block_end);
 
     void allocate_ecc_op_polynomials(const Circuit&)
         requires IsMegaFlavor<Flavor>;
