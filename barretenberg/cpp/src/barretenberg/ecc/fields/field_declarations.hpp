@@ -27,6 +27,21 @@
 #define BBERG_NO_ASM 1
 #endif
 
+// On Apple-silicon arm64 we provide hand-scheduled inline-assembly Montgomery multiplication and
+// squaring routines (see field_impl_arm64.hpp). They apply only to 4x64-bit-limb fields whose
+// modulus top limb is < 2^62 (the "no-carry" CIOS condition); everything else falls through to
+// the generic implementation.
+// NOTE: the build system passes -DDISABLE_ASM=1 on every arm64 build (it predates arm64 assembly
+// and means "the x86-64 assembly is unavailable"), so that flag deliberately does NOT gate this
+// path. Define DISABLE_ARM64_ASM to force the generic implementation instead. The routines are
+// pure register asm (no memory operands), so they are safe under ASAN builds.
+#if defined(__aarch64__) && defined(__APPLE__) && !defined(__wasm__) && !defined(DISABLE_ARM64_ASM) &&                 \
+    defined(__SIZEOF_INT128__)
+#define BBERG_ARM64_ASM 1
+#else
+#define BBERG_ARM64_ASM 0
+#endif
+
 namespace bb {
 
 // Threshold for "large" moduli (>= 2^254). When the top limb of the modulus is >= 2^62,
@@ -648,6 +663,21 @@ template <class Params_> struct alignas(32) field {
     BB_INLINE static field asm_reduce_once(const field& a) noexcept;
     BB_INLINE static void asm_self_reduce_once(field& a) noexcept;
     static constexpr uint64_t zero_reference = 0x00ULL;
+#endif
+#if BBERG_ARM64_ASM
+    // Hand-scheduled arm64 inline-assembly Montgomery multiplication/squaring (no-carry CIOS).
+    // Bit-identical to the generic montgomery_mul/montgomery_square. Defined in field_impl_arm64.hpp.
+    BB_INLINE static field asm_montgomery_mul_arm64(const field& a, const field& b) noexcept;
+    BB_INLINE static field asm_montgomery_sqr_arm64(const field& a) noexcept;
+    // True (resolved by the optimizer post-inlining) when every limb is a compiler-known constant.
+    // In that case the constexpr-friendly generic path is preferred over the (opaque) inline
+    // assembly so expressions like `x + fr(1)` keep constant-folding at -O2/-O3.
+    BB_INLINE static constexpr bool arm64_known_constant(const field& a) noexcept
+    {
+        return static_cast<bool>(__builtin_constant_p(a.data[0])) &&
+               static_cast<bool>(__builtin_constant_p(a.data[1])) &&
+               static_cast<bool>(__builtin_constant_p(a.data[2])) && static_cast<bool>(__builtin_constant_p(a.data[3]));
+    }
 #endif
     constexpr field tonelli_shanks_sqrt() const noexcept;
     static constexpr size_t primitive_root_log_size() noexcept;
