@@ -633,13 +633,31 @@ template class bb::scalar_multiplication::legacy::MSM<bb::curve::BN254>;
 
 // ===================================================================================
 // Public MSM facade implementation (see scalar_multiplication.hpp). Routes to the
-// `_fast` rewrite by default, or `legacy::` when BB_MSM_LEGACY is set.
+// `_fast` rewrite by default, or `legacy::` when single-threaded or when
+// BB_MSM_LEGACY is set.
 // ===================================================================================
 namespace bb::scalar_multiplication {
 
 bool use_legacy_msm() noexcept
 {
-    static const bool legacy_selected = std::getenv("BB_MSM_LEGACY") != nullptr;
+    // The `_fast` rewrite derives its advantage from its round-parallel pass structure: threads
+    // hide the extra schedule/scatter memory traffic of its bucket pipeline. Running
+    // single-threaded there is nothing to hide and the legacy implementation is measurably
+    // faster (Apple M-series, 2^21 UltraHonk benchmark circuit, HARDWARE_CONCURRENCY=1: full
+    // prove ~16-20% slower with the rewrite; isolated 2^21 random MSM 3.11s legacy vs 3.63s
+    // fast). Multithreaded, the rewrite wins (e.g. 2^21 random at 8 threads: 530ms legacy vs
+    // 512ms fast), so it remains the default whenever more than one core is available.
+    // Env overrides (each read once): BB_MSM_FAST=1 forces the rewrite, BB_MSM_LEGACY=1 forces
+    // legacy.
+    static const bool legacy_selected = [] {
+        if (std::getenv("BB_MSM_FAST") != nullptr) {
+            return false;
+        }
+        if (std::getenv("BB_MSM_LEGACY") != nullptr) {
+            return true;
+        }
+        return get_num_cpus() <= 1;
+    }();
     return legacy_selected;
 }
 

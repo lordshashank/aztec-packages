@@ -310,17 +310,30 @@ template <typename FF, size_t NUM_WIRES_> class ExecutionTraceBlock {
 #endif
 
     /**
+     * @brief Release the wire-index vectors only, caching the block size so size() still works.
+     * @details Called during proving-key construction once this block's wires have been copied to the wire
+     * polynomials and its copy-cycle nodes have been emitted; the selector data, which is consumed later, is
+     * retained. Idempotent with respect to the cached size (a second call won't cache the freed size).
+     */
+    void free_wires()
+    {
+        if (!data_freed_) {
+            cached_size_ = std::get<0>(wires).size();
+            data_freed_ = true;
+        }
+        for (auto& wire : wires) {
+            wire.clear();
+            wire.shrink_to_fit();
+        }
+    }
+
+    /**
      * @brief Release wire and selector memory. Caches block size so size() still works.
      * @details Called after trace data has been copied to prover polynomials.
      */
     void free_data()
     {
-        cached_size_ = std::get<0>(wires).size();
-        data_freed_ = true;
-        for (auto& wire : wires) {
-            wire.clear();
-            wire.shrink_to_fit();
-        }
+        free_wires();
         for (auto& sel : non_gate_selectors) {
             sel.free_memory();
         }
