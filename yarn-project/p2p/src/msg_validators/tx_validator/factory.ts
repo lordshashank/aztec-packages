@@ -292,6 +292,7 @@ export function createTxValidatorForAcceptingTxsOverRPC(
     setupAllowList,
     gasFees,
     skipFeeEnforcement,
+    isSimulation,
     timestamp,
     blockNumber,
     txsPermitted,
@@ -303,6 +304,7 @@ export function createTxValidatorForAcceptingTxsOverRPC(
     setupAllowList: AllowedElement[];
     gasFees: GasFees;
     skipFeeEnforcement?: boolean;
+    isSimulation?: boolean;
     timestamp: UInt64;
     blockNumber: BlockNumber;
     txsPermitted: boolean;
@@ -335,11 +337,17 @@ export function createTxValidatorForAcceptingTxsOverRPC(
     new DoubleSpendTxValidator(new NullifierCache(db), bindings),
     new DataTxValidator(bindings),
     new ContractInstanceTxValidator(bindings),
-    // Declared gas-limit admission is not fee enforcement, so it always runs even when fees are skipped. The
-    // fee-balance check below stays behind `skipFeeEnforcement`. GasTxValidator is constructed without the
-    // limit opts so it does not re-run this same check.
-    new GasLimitsValidator<Tx>({ maxTxL2Gas, maxTxDAGas, bindings }),
   ];
+
+  // Declared gas-limit admission is not fee enforcement, so it runs even when fees are skipped, but it is
+  // skipped during simulation: gas estimation submits intentionally-inflated `forEstimation` limits (above
+  // the per-tx max) and the wallet clamps the real tx to the admission limit afterward, so enforcing the
+  // limit on the estimation tx would reject a valid estimation. The fee-balance check below stays behind
+  // `skipFeeEnforcement`, and GasTxValidator is constructed without the limit opts so it does not re-run
+  // this same check.
+  if (!isSimulation) {
+    validators.push(new GasLimitsValidator<Tx>({ maxTxL2Gas, maxTxDAGas, bindings }));
+  }
 
   if (!skipFeeEnforcement) {
     validators.push(

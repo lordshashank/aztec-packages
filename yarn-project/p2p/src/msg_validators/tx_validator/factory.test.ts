@@ -251,6 +251,25 @@ describe('Validator factory functions', () => {
       expect(names).toContain(TxProofValidator.name);
     });
 
+    it('excludes the gas-limits admission validator during simulation', () => {
+      // Gas estimation submits intentionally-inflated forEstimation limits, so the admission limit must not
+      // reject the estimation tx; the wallet clamps the real tx afterward.
+      const validator = createTxValidatorForAcceptingTxsOverRPC(db, contractSource, undefined, {
+        l1ChainId: 1,
+        rollupVersion: 2,
+        setupAllowList: [],
+        gasFees: new GasFees(1, 1),
+        skipFeeEnforcement: true,
+        isSimulation: true,
+        timestamp: 100n,
+        blockNumber: BlockNumber(5),
+        txsPermitted: true,
+      });
+
+      const aggregate = validator as AggregateTxValidator<unknown>;
+      expect(getValidatorNames(aggregate)).not.toContain(GasLimitsValidator.name);
+    });
+
     it('excludes proof validator when no verifier is provided', () => {
       const validator = createTxValidatorForAcceptingTxsOverRPC(db, contractSource, undefined, {
         l1ChainId: 1,

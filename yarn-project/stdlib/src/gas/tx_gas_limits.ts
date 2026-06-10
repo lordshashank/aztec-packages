@@ -7,6 +7,7 @@ import {
   BLOBS_PER_CHECKPOINT,
   DA_GAS_PER_FIELD,
   FIELDS_PER_BLOB,
+  MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT,
   MAX_PROCESSABLE_L2_GAS,
   MAX_TX_DA_GAS,
 } from '@aztec/constants';
@@ -86,22 +87,36 @@ export function getDaCheckpointBudgetForTxs(maxBlocksPerCheckpoint: number): num
  *
  * @param manaCheckpointBudget - L2 (mana) budget per checkpoint (`rollupManaLimit`). When omitted (e.g. a
  * client that does not know the chain's mana limit), the L2 limit falls back to the per-tx maximum.
+ * @param daCheckpointBudget - Overrides the DA checkpoint budget used to derive the per-block DA allocation.
+ * Defaults to the overhead-netted {@link getDaCheckpointBudgetForTxs}, which the network admission limit uses.
+ * Callers modeling the real builder grant pass the raw `MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT` instead, since
+ * the builder budgets DA from the raw checkpoint capacity.
  */
 export function computeNetworkTxGasLimits(opts: {
   maxBlocksPerCheckpoint: number;
   manaCheckpointBudget?: number;
   daMultiplier?: number;
   l2Multiplier?: number;
+  daCheckpointBudget?: number;
 }): Gas {
   const blocks = Math.max(1, opts.maxBlocksPerCheckpoint);
-  const daBudget = getDaCheckpointBudgetForTxs(blocks);
+  const daBudget = opts.daCheckpointBudget ?? getDaCheckpointBudgetForTxs(blocks);
   const daMultiplier = opts.daMultiplier ?? MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER;
   const l2Multiplier = opts.l2Multiplier ?? MIN_PER_BLOCK_ALLOCATION_MULTIPLIER;
 
-  const daGas = Math.min(MAX_TX_DA_GAS, Math.ceil((daBudget / blocks) * daMultiplier));
+  // Clamp by the whole-checkpoint budget too: at small block counts the per-block share scaled by the
+  // multiplier can exceed the checkpoint budget itself (e.g. at blocks=1 a >1 multiplier overshoots), which
+  // would admit a tx no builder can ever pack — the builder caps each block by the remaining budget. Clamping
+  // by the budget makes "admitted ⇒ buildable" unconditional. (For DA the per-tx maximum always binds first,
+  // so the budget clamp is currently moot, but it keeps the invariant explicit.)
+  const daGas = Math.min(MAX_TX_DA_GAS, daBudget, Math.ceil((daBudget / blocks) * daMultiplier));
   const l2Gas =
     opts.manaCheckpointBudget !== undefined
-      ? Math.min(MAX_PROCESSABLE_L2_GAS, Math.ceil((opts.manaCheckpointBudget / blocks) * l2Multiplier))
+      ? Math.min(
+          MAX_PROCESSABLE_L2_GAS,
+          opts.manaCheckpointBudget,
+          Math.ceil((opts.manaCheckpointBudget / blocks) * l2Multiplier),
+        )
       : MAX_PROCESSABLE_L2_GAS;
 
   return new Gas(daGas, l2Gas);
@@ -153,11 +168,16 @@ export function builderMeetsNetworkTxGasLimits(opts: {
 }): { meetsMultipliers: boolean; meetsWithCaps: boolean; networkLimit: Gas; allocationLimit: Gas; builderLimit: Gas } {
   const { maxBlocksPerCheckpoint, manaCheckpointBudget } = opts;
   const networkLimit = computeNetworkTxGasLimits({ maxBlocksPerCheckpoint, manaCheckpointBudget });
+  // Model the builder side with the raw checkpoint DA budget (`MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT`), since
+  // the builder budgets DA from the raw blob capacity rather than the overhead-netted budget the network
+  // admission limit uses. Netting the builder side too would make this guard slightly over-strict, refusing
+  // startup for DA multipliers just under the minimum where the raw budget still grants enough.
   const allocationLimit = computeNetworkTxGasLimits({
     maxBlocksPerCheckpoint,
     manaCheckpointBudget,
     daMultiplier: opts.daMultiplier,
     l2Multiplier: opts.l2Multiplier,
+    daCheckpointBudget: MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT,
   });
   // The builder caps each block by the node's absolute per-block gas limits in addition to the multiplier
   // allocation, so a tx is only buildable if it fits under both.

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_BLOCK_DURATION,
   DEFAULT_CHECKPOINT_PROPOSAL_INIT_TIME,
   DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
   DEFAULT_MIN_BLOCK_DURATION,
@@ -18,7 +19,6 @@ export type ProposerTimetableConfig = {
   attestationPropagationTime?: number;
   checkpointProposalPrepareTime?: number;
   checkpointProposalSyncGraceSeconds?: number;
-  enforceTimeTable?: boolean;
 };
 
 /**
@@ -32,12 +32,11 @@ export function buildProposerTimetable(
 ): ProposerTimetable {
   return new ProposerTimetable({
     l1Constants,
-    blockDuration: config.blockDurationMs !== undefined ? config.blockDurationMs / 1000 : undefined,
+    blockDuration: config.blockDurationMs !== undefined ? config.blockDurationMs / 1000 : DEFAULT_BLOCK_DURATION,
     minBlockDuration: config.minBlockDuration ?? DEFAULT_MIN_BLOCK_DURATION,
     p2pPropagationTime: config.attestationPropagationTime ?? DEFAULT_P2P_PROPAGATION_TIME,
     checkpointProposalPrepareTime: config.checkpointProposalPrepareTime ?? DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
     checkpointProposalInitTime: DEFAULT_CHECKPOINT_PROPOSAL_INIT_TIME,
     checkpointProposalSyncGrace: config.checkpointProposalSyncGraceSeconds,
-    enforce: config.enforceTimeTable ?? true,
   });
 }

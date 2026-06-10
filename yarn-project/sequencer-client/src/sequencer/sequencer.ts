@@ -35,13 +35,7 @@ import {
 import type { L1ToL2MessageSource } from '@aztec/stdlib/messaging';
 import type { CoordinationSignatureContext } from '@aztec/stdlib/p2p';
 import { pickFromSchema } from '@aztec/stdlib/schemas';
-import {
-  DEFAULT_CHECKPOINT_PROPOSAL_INIT_TIME,
-  DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
-  DEFAULT_MIN_BLOCK_DURATION,
-  DEFAULT_P2P_PROPAGATION_TIME,
-  ProposerTimetable,
-} from '@aztec/stdlib/timetable';
+import { ProposerTimetable, buildProposerTimetable } from '@aztec/stdlib/timetable';
 import { Attributes, type TelemetryClient, type Tracer, getTelemetryClient, trackSpan } from '@aztec/telemetry-client';
 import { FullNodeCheckpointsBuilder, NodeKeystoreAdapter, type ValidatorClient } from '@aztec/validator-client';
 
@@ -182,23 +176,16 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
   }
 
   /**
-   * Builds the proposer timetable from the given config and L1 constants. The fast local/e2e profile and
-   * budget clamping happen inside {@link ProposerTimetable}; here we only fill the operational budgets the
-   * config leaves unset with the shared `DEFAULT_*` values (the config layer owns the defaults).
+   * Builds the proposer timetable from the given config and L1 constants via the shared
+   * {@link buildProposerTimetable} helper, so the sequencer derives the same blocks-per-checkpoint as the p2p
+   * layer and `getNodeInfo`. The fast local/e2e profile and budget clamping happen inside
+   * {@link ProposerTimetable}.
    *
    * Throws if the timing geometry is invalid or the per-block allocation multipliers are below the network
    * minimums; callers must treat a throw as a rejected config and not commit it.
    */
   private buildTimetable(config: ResolvedSequencerConfig): ProposerTimetable {
-    const timetable = new ProposerTimetable({
-      l1Constants: this.l1Constants,
-      blockDuration: config.blockDurationMs / 1000,
-      minBlockDuration: config.minBlockDuration ?? DEFAULT_MIN_BLOCK_DURATION,
-      p2pPropagationTime: config.attestationPropagationTime ?? DEFAULT_P2P_PROPAGATION_TIME,
-      checkpointProposalPrepareTime: config.checkpointProposalPrepareTime ?? DEFAULT_CHECKPOINT_PROPOSAL_PREPARE_TIME,
-      checkpointProposalInitTime: DEFAULT_CHECKPOINT_PROPOSAL_INIT_TIME,
-      checkpointProposalSyncGrace: config.checkpointProposalSyncGraceSeconds,
-    });
+    const timetable = buildProposerTimetable(config, this.l1Constants);
 
     const maxNumberOfBlocks = timetable.getMaxBlocksPerCheckpoint();
     this.log.info(`Sequencer timetable initialized with ${maxNumberOfBlocks} blocks per slot`, {
@@ -236,7 +223,9 @@ export class Sequencer extends (EventEmitter as new () => TypedEventEmitter<Sequ
    * When the multipliers meet the floor but an absolute per-block gas cap (`maxDABlockGas` / `maxL2BlockGas`)
    * shrinks the builder's effective grant below the network limit, this is legitimate operator
    * restrictiveness — the node simply builds smaller blocks and such txs stay in the pool for other
-   * proposers — so we only log a warning rather than failing startup.
+   * proposers — so we only log a warning rather than failing startup. Restrictive tx-count caps
+   * (`maxTxsPerBlock` / `maxTxsPerCheckpoint`) can likewise make the builder skip admitted txs; they are
+   * intentionally not modeled here for the same reason.
    */
   private assertConfigMeetsNetworkTxLimits(config: ResolvedSequencerConfig, maxBlocksPerCheckpoint: number) {
     const { meetsMultipliers, meetsWithCaps, networkLimit, allocationLimit, builderLimit } =

@@ -33,7 +33,7 @@ The `Wallet` type in `@aztec/aztec.js` now requires a `getMaxTxGasLimits(): Prom
 
 ### [Aztec.js / PXE] `NodeInfo.txsLimits` is now required
 
-`NodeInfo.txsLimits` was previously an optional field. It is now required: every node advertises the maximum gas a single tx may declare (`{ gas: { daGas, l2Gas } }`) and wallets rely on it for fallback gas limits. Clients built against this version cannot talk to nodes that predate the field.
+`NodeInfo` now carries a required `txsLimits` field: every node advertises the maximum gas a single tx may declare (`{ gas: { daGas, l2Gas } }`) and wallets rely on it for fallback gas limits. Clients built against this version cannot talk to nodes that predate the field.
 
 ### [Aztec.js] `GasSettings.fallback` requires explicit `gasLimits`
 
@@ -51,26 +51,11 @@ The `Wallet` type in `@aztec/aztec.js` now requires a `getMaxTxGasLimits(): Prom
 
 The following exports have been removed from `@aztec/stdlib`:
 
-- `getDefaultNetworkTxGasLimits`
-- `getDefaultMaxBlocksPerCheckpoint`
-- `DEFAULT_MAINNET_AZTEC_SLOT_DURATION`
-- `DEFAULT_MAINNET_ETHEREUM_SLOT_DURATION`
-- `DEFAULT_MAINNET_BLOCK_DURATION_MS`
 - `APPROXIMATE_MAX_DA_GAS_PER_BLOCK`
 - `FALLBACK_TEARDOWN_L2_GAS_LIMIT`
 - `FALLBACK_TEARDOWN_DA_GAS_LIMIT`
 
-Two per-block multiplier constants have been renamed:
-
-```diff
-- DEFAULT_PER_BLOCK_ALLOCATION_MULTIPLIER
-+ MIN_PER_BLOCK_ALLOCATION_MULTIPLIER
-
-- DEFAULT_PER_BLOCK_DA_ALLOCATION_MULTIPLIER
-+ MIN_PER_BLOCK_DA_ALLOCATION_MULTIPLIER
-```
-
-**Impact**: Any code that imported these symbols must switch to the live node-advertised limits via `wallet.getMaxTxGasLimits()` or the renamed constants.
+**Impact**: Any code that imported these symbols must switch to the live node-advertised limits via `wallet.getMaxTxGasLimits()`.
 
 ### [Aztec.nr] `messages::message_delivery` module moved to `messages::delivery`
 

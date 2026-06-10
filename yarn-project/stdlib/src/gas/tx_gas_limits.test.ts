@@ -61,6 +61,15 @@ describe('computeNetworkTxGasLimits', () => {
       Math.min(MAX_PROCESSABLE_L2_GAS, Math.ceil((manaCheckpointBudget / 10) * MIN_PER_BLOCK_ALLOCATION_MULTIPLIER)),
     );
   });
+
+  it('clamps L2 gas by the checkpoint mana budget at blocks=1 (multiplier would overshoot)', () => {
+    // At a single block the per-block share is the whole budget, and the >1 multiplier would push the limit
+    // above the budget itself — admitting a tx no builder can ever pack (the builder caps L2 by remainingMana).
+    // The budget clamp keeps the advertised L2 limit at or below the budget.
+    const manaCheckpointBudget = 1_000_000;
+    const gas = computeNetworkTxGasLimits({ maxBlocksPerCheckpoint: 1, manaCheckpointBudget });
+    expect(gas.l2Gas).toBeLessThanOrEqual(manaCheckpointBudget);
+  });
 });
 
 describe('getDaCheckpointBudgetForTxs', () => {
@@ -140,6 +149,21 @@ describe('builderMeetsNetworkTxGasLimits', () => {
     });
     expect(meetsMultipliers).toBe(false);
     expect(allocationLimit.l2Gas).toBeLessThan(networkLimit.l2Gas);
+  });
+
+  it('models the builder DA grant with the raw checkpoint budget, not the overhead-netted one', () => {
+    // The network admission DA limit uses the overhead-netted checkpoint budget (× the 1.5 minimum), while the
+    // real builder grants DA from the raw `MAX_PROCESSABLE_DA_GAS_PER_CHECKPOINT`. Netting the builder side too
+    // would make the guard over-strict in the ~[1.4962, 1.5) band, where a slightly sub-minimum multiplier on
+    // the raw budget still reaches the netted network limit. Such a multiplier must therefore pass.
+    const { meetsMultipliers, allocationLimit, networkLimit } = builderMeetsNetworkTxGasLimits({
+      maxBlocksPerCheckpoint,
+      manaCheckpointBudget,
+      daMultiplier: 1.4962259928385417,
+      l2Multiplier: MIN_PER_BLOCK_ALLOCATION_MULTIPLIER,
+    });
+    expect(meetsMultipliers).toBe(true);
+    expect(allocationLimit.daGas).toBeGreaterThanOrEqual(networkLimit.daGas);
   });
 
   it('passes the multiplier check but fails the cap check when an absolute per-block cap is under the network limit', () => {

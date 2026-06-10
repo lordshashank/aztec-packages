@@ -158,11 +158,23 @@ export abstract class BaseWallet implements Wallet {
     return senders.map(sender => ({ item: sender, alias: '' }));
   }
 
-  async getChainInfo(): Promise<ChainInfo> {
+  /**
+   * Fetches and caches the node info for the wallet's lifetime, since a wallet talks to a single network and
+   * node info never changes. A rejected fetch clears the cache so the next call retries instead of replaying
+   * the cached rejection forever — important because `getMaxTxGasLimits` (called on every send) depends on it.
+   */
+  private getNodeInfo(): Promise<NodeInfo> {
     if (!this.nodeInfoPromise) {
-      this.nodeInfoPromise = this.aztecNode.getNodeInfo();
+      this.nodeInfoPromise = this.aztecNode.getNodeInfo().catch(err => {
+        this.nodeInfoPromise = undefined;
+        throw err;
+      });
     }
-    const { l1ChainId, rollupVersion } = await this.nodeInfoPromise;
+    return this.nodeInfoPromise;
+  }
+
+  async getChainInfo(): Promise<ChainInfo> {
+    const { l1ChainId, rollupVersion } = await this.getNodeInfo();
     return { chainId: new Fr(l1ChainId), version: new Fr(rollupVersion) };
   }
 
@@ -173,10 +185,7 @@ export abstract class BaseWallet implements Wallet {
    * a single network.
    */
   public async getMaxTxGasLimits(): Promise<Gas> {
-    if (!this.nodeInfoPromise) {
-      this.nodeInfoPromise = this.aztecNode.getNodeInfo();
-    }
-    const { txsLimits } = await this.nodeInfoPromise;
+    const { txsLimits } = await this.getNodeInfo();
     return new Gas(txsLimits.gas.daGas, txsLimits.gas.l2Gas);
   }
 

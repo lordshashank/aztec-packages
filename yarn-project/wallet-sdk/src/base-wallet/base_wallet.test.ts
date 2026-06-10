@@ -249,6 +249,44 @@ describe('BaseWallet', () => {
     });
   });
 
+  describe('node info caching', () => {
+    it('refetches node info after a rejected fetch instead of caching the rejection', async () => {
+      pxe = mock<PXE>();
+      node = mock<AztecNode>();
+      const wallet = new BasicWallet(pxe, node);
+
+      node.getNodeInfo.mockRejectedValueOnce(new Error('node unavailable')).mockResolvedValue({
+        ...mock<NodeInfo>(),
+        l1ChainId: 1,
+        rollupVersion: 1,
+        txsLimits: { gas: { daGas: 117_668, l2Gas: 6_540_000 } },
+      });
+
+      await expect(wallet.getMaxTxGasLimits()).rejects.toThrow('node unavailable');
+
+      const gas = await wallet.getMaxTxGasLimits();
+      expect(gas).toEqual(new Gas(117_668, 6_540_000));
+      expect(node.getNodeInfo).toHaveBeenCalledTimes(2);
+    });
+
+    it('caches a successful node info fetch for subsequent calls', async () => {
+      pxe = mock<PXE>();
+      node = mock<AztecNode>();
+      const wallet = new BasicWallet(pxe, node);
+
+      node.getNodeInfo.mockResolvedValue({
+        ...mock<NodeInfo>(),
+        l1ChainId: 1,
+        rollupVersion: 1,
+        txsLimits: { gas: { daGas: 117_668, l2Gas: 6_540_000 } },
+      });
+
+      await wallet.getMaxTxGasLimits();
+      await wallet.getChainInfo();
+      expect(node.getNodeInfo).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('should extract offchain messages with anchor block timestamp on sendTx', async () => {
     pxe = mock<PXE>();
     node = mock<AztecNode>();

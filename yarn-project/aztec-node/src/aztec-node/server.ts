@@ -1747,6 +1747,7 @@ export class AztecNodeService implements AztecNode, AztecNodeAdmin, AztecNodeDeb
         ],
         gasFees: await this.getCurrentMinFees(),
         skipFeeEnforcement,
+        isSimulation,
         txsPermitted: !this.config.disableTransactions,
         maxTxL2Gas: networkTxGasLimits.l2Gas,
         maxTxDAGas: networkTxGasLimits.daGas,
