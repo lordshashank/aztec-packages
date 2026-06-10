@@ -73,7 +73,15 @@ template <typename Flavor_> class ProverInstance_ {
         return typename Flavor::PrecomputedData{ polynomials.get_precomputed(), metadata };
     }
 
-    ProverInstance_(Circuit& circuit);
+    /**
+     * @param consume_circuit If true (Ultra flavors only), the circuit's memory (gate data, witness values, copy
+     * constraint and lookup bookkeeping) is progressively released as soon as it has been transferred into the
+     * prover polynomials, and the large polynomials are allocated in stages interleaved with that release, so the
+     * builder and the full set of polynomials never coexist. This substantially reduces peak memory. The circuit is
+     * left in a valid-to-destroy but otherwise unusable state. Ignored for Mega flavors (databus/ecc-op data is
+     * needed downstream).
+     */
+    ProverInstance_(Circuit& circuit, bool consume_circuit = false);
 
     ProverInstance_() = default;
     ProverInstance_(const ProverInstance_&) = delete;

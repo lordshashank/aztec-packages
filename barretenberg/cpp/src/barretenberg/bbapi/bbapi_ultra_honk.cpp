@@ -37,7 +37,9 @@ std::shared_ptr<ProverInstance_<Flavor>> _compute_prover_instance(std::vector<ui
     // Measure function time and debug print
     auto initial_time = std::chrono::high_resolution_clock::now();
     typename Flavor::CircuitBuilder builder = _compute_circuit<Flavor, IO>(std::move(bytecode), std::move(witness));
-    auto prover_instance = std::make_shared<ProverInstance_<Flavor>>(builder);
+    // The builder is not used after PK construction: let the ProverInstance consume it, releasing its memory as
+    // soon as each piece of data has been transferred into the prover polynomials.
+    auto prover_instance = std::make_shared<ProverInstance_<Flavor>>(builder, /*consume_circuit=*/true);
     auto final_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(final_time - initial_time);
     info("CircuitProve: Proving key computed in ", duration.count(), " ms");

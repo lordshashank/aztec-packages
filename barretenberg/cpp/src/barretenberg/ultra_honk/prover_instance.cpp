@@ -19,10 +19,14 @@
 
 namespace bb {
 
-template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& circuit)
+template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& circuit, bool consume_circuit)
 {
     BB_BENCH_NAME("ProverInstance(Circuit&)");
     vinfo("Constructing ProverInstance");
+
+    if constexpr (IsMegaFlavor<Flavor>) {
+        consume_circuit = false; // Mega requires builder data (databus, ecc op) throughout construction
+    }
 
     // Check pairing point tagging: either no pairing points were created,
     // or all pairing points have been aggregated into a single equivalence class
@@ -41,6 +45,15 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
         if (!circuit.circuit_finalized) {
             circuit.finalize_circuit();
         }
+        if (consume_circuit) {
+            // The circuit is finalized: the bookkeeping that exists only to support gate creation/finalization can
+            // be released now, ahead of the large polynomial allocations below.
+            circuit.rom_ram_logic = typename Circuit::RomRamLogic{};
+            circuit.range_lists.clear();
+            circuit.constant_variable_indices.clear();
+            decltype(circuit.cached_partial_non_native_field_multiplications)().swap(
+                circuit.cached_partial_non_native_field_multiplications);
+        }
         // Compute block offsets before dyadic size so that compute_dyadic_size can account for the lookup table offset
         circuit.blocks.compute_offsets(TRACE_OFFSET);
         metadata.dyadic_size = compute_dyadic_size(circuit);
@@ -53,20 +66,58 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
         }
     }
 
+    // The polynomials are allocated in stages, interleaved with the population steps that consume the corresponding
+    // circuit data: this way, when the circuit is consumed, the memory of circuit data that has already been
+    // transferred into polynomials can be reused for subsequent allocations instead of growing the peak (the builder
+    // and the full set of polynomials never coexist).
     {
         BB_BENCH_NAME("allocating polynomials");
-        vinfo("allocating polynomials object in prover instance...");
+        vinfo("allocating wire and selector polynomials...");
 
         populate_memory_records(circuit);
+        if (consume_circuit) {
+            // The memory records have been copied (with offsets) into this instance; the circuit's copies are no
+            // longer needed.
+            std::vector<uint32_t>().swap(circuit.memory_read_records);
+            std::vector<uint32_t>().swap(circuit.memory_write_records);
+        }
+
         allocate_wires();
-        allocate_permutation_argument_polynomials();
         allocate_selectors(circuit);
-        allocate_table_lookup_polynomials(circuit);
-        allocate_lagrange_polynomials();
 
         if constexpr (IsMegaFlavor<Flavor>) {
             allocate_ecc_op_polynomials(circuit);
         }
+    }
+
+    // Populate the wire and selector polynomials and compute the copy cycles; under consume_circuit this
+    // progressively releases the circuit's gate data and witness values.
+    vinfo("populating trace...");
+    {
+        std::vector<CyclicPermutation> copy_cycles =
+            TraceToPolynomials<Flavor>::populate_wires_and_selectors(circuit, polynomials, consume_circuit);
+
+        // Allocate the permutation argument polynomials only now: under consume_circuit this reuses the memory
+        // released by the circuit's gate data instead of growing the peak.
+        allocate_permutation_argument_polynomials();
+
+        // Compute the permutation argument polynomials (sigma/id) and add them to proving key
+        {
+            BB_BENCH_NAME("compute_permutation_argument_polynomials");
+
+            compute_permutation_argument_polynomials<Flavor>(circuit, polynomials, copy_cycles);
+        }
+        if (consume_circuit) {
+            // Sigma/id polynomials are computed; the tag/tau data is no longer needed.
+            circuit.release_permutation_data();
+        }
+    }
+
+    {
+        BB_BENCH_NAME("allocating table/lagrange polynomials");
+
+        allocate_table_lookup_polynomials(circuit);
+        allocate_lagrange_polynomials();
         if constexpr (HasDataBus<Flavor>) {
             allocate_databus_polynomials(circuit);
         }
@@ -79,10 +130,6 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
         detail::GLOBAL_MEMORY_PROFILE.add_checkpoint("after_alloc");
     }
 
-    // Construct and add to proving key the wire, selector and copy constraint polynomials
-    vinfo("populating trace...");
-    TraceToPolynomials<Flavor>::populate(circuit, polynomials);
-
     if constexpr (IsMegaFlavor<Flavor>) {
         BB_BENCH_NAME("constructing databus polynomials");
         construct_databus_polynomials(circuit);
@@ -93,8 +140,13 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
     polynomials.lagrange_last.at(final_active_wire_idx) = 1;
 
     construct_lookup_polynomials(circuit);
+    if (consume_circuit) {
+        // The lookup table polynomials and read counts/tags have been constructed; the tables are no longer needed.
+        std::remove_reference_t<decltype(circuit.get_lookup_tables())>().swap(circuit.get_lookup_tables());
+    }
 
-    // Public inputs
+    // Public inputs (the pub_inputs block's size/offset remain valid after gate data release: blocks cache their
+    // size when freed)
     metadata.num_public_inputs = circuit.blocks.pub_inputs.size();
     metadata.pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
     for (size_t i = 0; i < metadata.num_public_inputs; ++i) {
