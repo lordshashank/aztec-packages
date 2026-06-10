@@ -122,6 +122,32 @@ template <typename FF_> class CircuitBuilderBase {
     std::vector<uint32_t> real_variable_tags;
     uint32_t current_tag = DEFAULT_TAG;
 
+    /**
+     * @brief Release the memory backing the witness values and the copy-constraint index bookkeeping.
+     * @details Intended for proving-key construction from a consumable circuit: callable once the wire values have
+     * been copied into the prover polynomials (after which `variables`/`real_variable_index` are no longer needed).
+     * The builder is left in a valid-to-destroy but unusable-for-circuit-construction state.
+     * @note `real_variable_tags` and `_tau` are NOT released here; they are still required by the permutation
+     * argument. Use release_permutation_data() once the sigma/id polynomials have been computed.
+     */
+    void release_wire_population_data()
+    {
+        std::vector<FF>().swap(variables);
+        std::vector<uint32_t>().swap(next_var_index);
+        std::vector<uint32_t>().swap(prev_var_index);
+        std::vector<uint32_t>().swap(real_variable_index);
+    }
+
+    /**
+     * @brief Release the tag/tau data used by the generalized permutation argument.
+     * @details Callable once the sigma/id polynomials have been computed during proving key construction.
+     */
+    void release_permutation_data()
+    {
+        std::vector<uint32_t>().swap(real_variable_tags);
+        _tau.clear();
+    }
+
     CircuitBuilderBase(bool is_write_vk_mode = false);
 
     CircuitBuilderBase(const CircuitBuilderBase& other) = default;

@@ -93,7 +93,15 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
         return typename Flavor::PrecomputedData{ polynomials.get_precomputed(), metadata };
     }
 
-    ProverInstance_(Circuit& circuit, const CommitmentKey& commitment_key = CommitmentKey())
+    /**
+     * @param consume_circuit If true (Ultra flavors only), the circuit's memory (gate data, witness values, copy
+     * constraint and lookup bookkeeping) is progressively released as soon as it has been transferred into the
+     * prover polynomials, substantially reducing peak memory. The circuit is left in a valid-to-destroy but
+     * otherwise unusable state. Ignored for Mega flavors.
+     */
+    ProverInstance_(Circuit& circuit,
+                    const CommitmentKey& commitment_key = CommitmentKey(),
+                    bool consume_circuit = false)
         : commitment_key(commitment_key)
     {
         BB_BENCH_NAME("ProverInstance(Circuit&)");
@@ -116,6 +124,19 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
         if (!circuit.circuit_finalized) {
             circuit.finalize_circuit(/* ensure_nonzero = */ true);
         }
+        if constexpr (IsMegaFlavor<Flavor>) {
+            consume_circuit = false; // Mega requires builder data (databus, ecc op) throughout construction
+        }
+        if (consume_circuit) {
+            // The circuit is finalized: the bookkeeping that exists only to support gate creation/finalization can
+            // be released now, ahead of the large polynomial allocations below.
+            circuit.rom_ram_logic = typename Circuit::RomRamLogic{};
+            circuit.range_lists.clear();
+            circuit.constant_variable_indices.clear();
+            decltype(circuit.cached_partial_non_native_field_multiplications)().swap(
+                circuit.cached_partial_non_native_field_multiplications);
+            mem_cp("builder finalize-only bookkeeping released");
+        }
         metadata.dyadic_size = compute_dyadic_size(circuit);
 
         // Find index of last non-trivial wire value in the trace
@@ -131,6 +152,10 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
             BB_BENCH_NAME("allocating polynomials");
 
             populate_memory_records(circuit);
+            if (consume_circuit) {
+                std::vector<uint32_t>().swap(circuit.memory_read_records);
+                std::vector<uint32_t>().swap(circuit.memory_write_records);
+            }
 
             allocate_wires();
             mem_cp("allocated wires");
@@ -157,9 +182,14 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
             polynomials.set_shifted();
         }
 
+        // Capture public-input metadata before populating the trace: when the circuit is consumed, the pub_inputs
+        // block data is released during population.
+        metadata.num_public_inputs = circuit.blocks.pub_inputs.size();
+        metadata.pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
+
         // Construct and add to proving key the wire, selector and copy constraint polynomials
         vinfo("populating trace...");
-        Trace::populate(circuit, polynomials);
+        Trace::populate(circuit, polynomials, consume_circuit);
         mem_cp("trace populated");
 
         {
@@ -189,9 +219,12 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
             construct_lookup_read_counts<Flavor>(polynomials.lookup_read_counts, polynomials.lookup_read_tags, circuit);
         }
         mem_cp("lookup read counts constructed");
-        { // Public inputs handling
-            metadata.num_public_inputs = circuit.blocks.pub_inputs.size();
-            metadata.pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
+        if (consume_circuit) {
+            // The lookup table polynomials and read counts/tags have been constructed; the tables are no longer
+            // needed.
+            std::remove_reference_t<decltype(circuit.get_lookup_tables())>().swap(circuit.get_lookup_tables());
+        }
+        { // Public inputs handling (num_public_inputs/pub_inputs_offset metadata was captured before trace population)
             for (size_t i = 0; i < metadata.num_public_inputs; ++i) {
                 size_t idx = i + metadata.pub_inputs_offset;
                 public_inputs.emplace_back(polynomials.w_r[idx]);

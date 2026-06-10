@@ -65,8 +65,11 @@ std::shared_ptr<ProverInstance_<Flavor>> _compute_prover_instance(std::vector<ui
     auto initial_time = std::chrono::high_resolution_clock::now();
     typename Flavor::CircuitBuilder builder = _compute_circuit<Flavor>(std::move(bytecode), std::move(witness));
     mem_cp("builder constructed (program freed)");
-    auto prover_instance = std::make_shared<ProverInstance_<Flavor>>(builder);
-    mem_cp("prover instance constructed (builder still alive)");
+    // The builder is not used after PK construction: let the ProverInstance consume it, releasing its memory as
+    // soon as each piece of data has been transferred into the prover polynomials.
+    auto prover_instance =
+        std::make_shared<ProverInstance_<Flavor>>(builder, typename Flavor::CommitmentKey(), /*consume_circuit=*/true);
+    mem_cp("prover instance constructed (builder consumed)");
     auto final_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(final_time - initial_time);
     info("CircuitProve: Proving key computed in ", duration.count(), " ms");

@@ -28,16 +28,20 @@ template <class Flavor> class TraceToPolynomials {
      * @note By default, this method constructs an execution trace that is sorted by gate type.
      *
      * @param builder
+     * @param consume_builder If true (Ultra flavors only), progressively release the builder's gate data
+     * (block wire-index vectors and selectors), witness values and copy-constraint bookkeeping as soon as each is
+     * transferred into the polynomials. This substantially reduces peak memory but leaves the builder unusable
+     * for anything but destruction. Ignored for Mega flavors (databus/ecc-op data is needed downstream).
      */
-    static void populate(Builder& builder, ProverPolynomials&);
+    static void populate(Builder& builder, ProverPolynomials&, bool consume_builder = false);
 
   private:
     /**
      * @brief Populate wire polynomials, selector polynomials and copy cycles from raw circuit data
      * @return std::vector<CyclicPermutation> copy cycles describing the copy constraints in the circuit
      */
-    static std::vector<CyclicPermutation> populate_wires_and_selectors_and_compute_copy_cycles(Builder& builder,
-                                                                                               ProverPolynomials&);
+    static std::vector<CyclicPermutation> populate_wires_and_selectors_and_compute_copy_cycles(
+        Builder& builder, ProverPolynomials&, bool consume_builder);
 
     /**
      * @brief Construct and add the goblin ecc op wires to the proving key

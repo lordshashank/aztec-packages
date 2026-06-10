@@ -120,6 +120,13 @@ template <typename FF> class Selector {
      * @param value Field element.
      */
     virtual void set(size_t idx, const FF& value) = 0;
+
+    /**
+     * @brief Release all storage held by the selector and reset its size to 0.
+     * @details Used to reclaim builder memory during proving key construction once the selector values have been
+     * copied into the prover polynomials.
+     */
+    virtual void clear() = 0;
 };
 
 /**
@@ -179,6 +186,8 @@ template <typename FF> class ZeroSelector : public Selector<FF> {
 
     bool empty() const override { return size_ == 0; }
 
+    void clear() override { size_ = 0; }
+
   private:
     static constexpr FF zero = 0;
     size_t size_ = 0;
@@ -208,6 +217,8 @@ template <typename FF> class SlabVectorSelector : public Selector<FF> {
 
     size_t size() const override { return data.size(); }
     bool empty() const override { return data.empty(); }
+
+    void clear() override { std::vector<FF>().swap(data); }
 
   private:
     std::vector<FF> data;
@@ -292,6 +303,22 @@ template <typename FF, size_t NUM_WIRES_> class ExecutionTraceBlock {
 #endif
 
     virtual RefVector<Selector<FF>> get_selectors() = 0;
+
+    /**
+     * @brief Release the memory backing the wire-index vectors and selectors of this block.
+     * @details Used to reclaim builder memory during proving key construction, immediately after this block's data
+     * has been copied into the prover polynomials. The block's trace_offset_ is retained but size() becomes 0, so
+     * any size-dependent queries must have been performed beforehand.
+     */
+    void clear_gate_data()
+    {
+        for (auto& wire : wires) {
+            WireType().swap(wire);
+        }
+        for (auto& selector : get_selectors()) {
+            selector.clear();
+        }
+    }
 
     void populate_wires(const uint32_t& idx_1, const uint32_t& idx_2, const uint32_t& idx_3, const uint32_t& idx_4)
     {
