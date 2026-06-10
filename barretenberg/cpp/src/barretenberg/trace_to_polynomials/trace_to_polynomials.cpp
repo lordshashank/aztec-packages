@@ -5,6 +5,7 @@
 // =====================
 
 #include "trace_to_polynomials.hpp"
+#include "barretenberg/common/mem_checkpoint.hpp"
 #include "barretenberg/ext/starknet/flavor/ultra_starknet_flavor.hpp"
 #include "barretenberg/ext/starknet/flavor/ultra_starknet_zk_flavor.hpp"
 
@@ -23,6 +24,7 @@ void TraceToPolynomials<Flavor>::populate(Builder& builder, typename Flavor::Pro
     BB_BENCH_NAME("trace populate");
 
     auto copy_cycles = populate_wires_and_selectors_and_compute_copy_cycles(builder, polynomials);
+    mem_cp("wires+selectors populated, copy cycles computed");
 
     if constexpr (IsMegaFlavor<Flavor>) {
         BB_BENCH_NAME("add_ecc_op_wires_to_prover_instance");
@@ -36,6 +38,7 @@ void TraceToPolynomials<Flavor>::populate(Builder& builder, typename Flavor::Pro
 
         compute_permutation_argument_polynomials<Flavor>(builder, polynomials, copy_cycles);
     }
+    mem_cp("permutation argument polynomials computed");
 }
 
 template <class Flavor>

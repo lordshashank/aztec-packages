@@ -5,6 +5,7 @@
 // =====================
 
 #pragma once
+#include "barretenberg/common/mem_checkpoint.hpp"
 #include "barretenberg/common/thread.hpp"
 #include "gemini.hpp"
 
@@ -63,9 +64,14 @@ std::vector<typename GeminiProver_<Curve>::Claim> GeminiProver_<Curve>::prove(
     const Fr rho = transcript->template get_challenge<Fr>("rho");
 
     Polynomial A_0 = polynomial_batcher.compute_batched(rho);
+    mem_cp("gemini: A_0 batched");
 
     // Construct the d-1 Gemini foldings of A₀(X)
     std::vector<Polynomial> fold_polynomials = compute_fold_polynomials(log_n, multilinear_challenge, A_0, has_zk);
+    // A₀ is fully consumed by the foldings; release its buffer before the partially-evaluated batch
+    // polynomials A₀₊/A₀₋ are allocated (they are derived from the batcher's internal F/G, not from A₀).
+    A_0 = Polynomial();
+    mem_cp("gemini: folds computed");
 
     // If virtual_log_n >= log_n, pad the fold commitments with dummy group elements [1]_1.
     for (size_t l = 0; l < virtual_log_n - 1; l++) {
@@ -84,8 +90,10 @@ std::vector<typename GeminiProver_<Curve>::Claim> GeminiProver_<Curve>::prove(
         throw_or_abort("Gemini evaluation challenge is in the SmallSubgroup.");
     }
 
+    mem_cp("gemini: folds committed");
     // Compute polynomials A₀₊(X) = F(X) + G(X)/r and A₀₋(X) = F(X) - G(X)/r
     auto [A_0_pos, A_0_neg] = polynomial_batcher.compute_partially_evaluated_batch_polynomials(r_challenge);
+    mem_cp("gemini: A_0_pos/neg computed");
     // Construct claims for the d + 1 univariate evaluations A₀₊(r), A₀₋(-r), and Foldₗ(−r^{2ˡ}), l = 1, ..., d-1
     std::vector<Claim> claims = construct_univariate_opening_claims(
         virtual_log_n, std::move(A_0_pos), std::move(A_0_neg), std::move(fold_polynomials), r_challenge);

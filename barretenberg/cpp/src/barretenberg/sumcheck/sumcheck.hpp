@@ -551,7 +551,9 @@ template <typename Flavor> class SumcheckProver {
 
         // Initialize the partially evaluated polynomials which will be used in the following rounds.
         // This will use the information in the structured full polynomials to save memory if possible.
+        mem_cp("sumcheck: before pep table alloc");
         partially_evaluated_polynomials = PartiallyEvaluatedMultivariates(full_polynomials, multivariate_n);
+        mem_cp("sumcheck: after pep table alloc");
 
         {
             BB_BENCH_NAME("rest of sumcheck round 1");

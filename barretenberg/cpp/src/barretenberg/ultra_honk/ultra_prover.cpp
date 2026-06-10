@@ -6,6 +6,7 @@
 
 #include "ultra_prover.hpp"
 #include "barretenberg/commitment_schemes/gemini/gemini.hpp"
+#include "barretenberg/common/mem_checkpoint.hpp"
 #include "barretenberg/commitment_schemes/shplonk/shplemini.hpp"
 #include "barretenberg/flavor/mega_avm_flavor.hpp"
 #include "barretenberg/sumcheck/sumcheck.hpp"
@@ -93,15 +94,18 @@ template <IsUltraOrMegaHonk Flavor> typename UltraProver_<Flavor>::Proof UltraPr
     OinkProver<Flavor> oink_prover(prover_instance, honk_vk, transcript);
     oink_prover.prove();
     vinfo("created oink proof");
+    mem_cp("oink done");
 
     generate_gate_challenges();
 
     // Run sumcheck
     execute_sumcheck_iop();
     vinfo("finished relation check rounds");
+    mem_cp("sumcheck done (sumcheck objects freed)");
     // Execute Shplemini PCS
     execute_pcs();
     vinfo("finished PCS rounds");
+    mem_cp("pcs done");
 
     return export_proof();
 }
@@ -155,9 +159,11 @@ template <IsUltraOrMegaHonk Flavor> void UltraProver_<Flavor>::execute_pcs()
         ck = CommitmentKey(prover_instance->dyadic_size());
     }
 
+    mem_cp("pcs: before polynomial batcher alloc");
     PolynomialBatcher polynomial_batcher(prover_instance->dyadic_size());
     polynomial_batcher.set_unshifted(prover_instance->polynomials.get_unshifted());
     polynomial_batcher.set_to_be_shifted_by_one(prover_instance->polynomials.get_to_be_shifted());
+    mem_cp("pcs: after polynomial batcher alloc");
 
     OpeningClaim prover_opening_claim;
     if constexpr (!Flavor::HasZK) {
@@ -177,8 +183,10 @@ template <IsUltraOrMegaHonk Flavor> void UltraProver_<Flavor>::execute_pcs()
                                                               small_subgroup_ipa_prover.get_witness_polynomials());
     }
     vinfo("executed multivariate-to-univariate reduction");
+    mem_cp("pcs: after shplemini prove");
     PCS::compute_opening_proof(ck, prover_opening_claim, transcript);
     vinfo("computed opening proof");
+    mem_cp("pcs: after opening proof");
 }
 
 template class UltraProver_<UltraFlavor>;

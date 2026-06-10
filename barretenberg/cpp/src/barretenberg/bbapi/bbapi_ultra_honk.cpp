@@ -1,5 +1,6 @@
 #include "barretenberg/bbapi/bbapi_ultra_honk.hpp"
 #include "barretenberg/bbapi/bbapi_shared.hpp"
+#include "barretenberg/common/mem_checkpoint.hpp"
 #include "barretenberg/circuit_checker/circuit_checker.hpp"
 #include "barretenberg/commitment_schemes/ipa/ipa.hpp"
 #include "barretenberg/common/serialize.hpp"
@@ -43,12 +44,17 @@ template <typename Flavor, typename Circuit = typename Flavor::CircuitBuilder>
 Circuit _compute_circuit(std::vector<uint8_t>&& bytecode, std::vector<uint8_t>&& witness)
 {
     const acir_format::ProgramMetadata metadata = _create_program_metadata<Flavor>();
+    mem_cp("before acir parse");
     acir_format::AcirProgram program{ acir_format::circuit_buf_to_acir_format(std::move(bytecode)) };
+    mem_cp("after acir parse");
 
     if (!witness.empty()) {
         program.witness = acir_format::witness_buf_to_witness_vector(std::move(witness));
     }
-    return acir_format::create_circuit<Circuit>(program, metadata);
+    mem_cp("after witness parse");
+    auto circuit = acir_format::create_circuit<Circuit>(program, metadata);
+    mem_cp("after create_circuit (program still alive)");
+    return circuit;
 }
 
 template <typename Flavor>
@@ -58,7 +64,9 @@ std::shared_ptr<ProverInstance_<Flavor>> _compute_prover_instance(std::vector<ui
     // Measure function time and debug print
     auto initial_time = std::chrono::high_resolution_clock::now();
     typename Flavor::CircuitBuilder builder = _compute_circuit<Flavor>(std::move(bytecode), std::move(witness));
+    mem_cp("builder constructed (program freed)");
     auto prover_instance = std::make_shared<ProverInstance_<Flavor>>(builder);
+    mem_cp("prover instance constructed (builder still alive)");
     auto final_time = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(final_time - initial_time);
     info("CircuitProve: Proving key computed in ", duration.count(), " ms");
@@ -72,6 +80,7 @@ CircuitProve::Response _prove(std::vector<uint8_t>&& bytecode,
     using Proof = typename Flavor::Transcript::Proof;
 
     auto prover_instance = _compute_prover_instance<Flavor>(std::move(bytecode), std::move(witness));
+    mem_cp("builder freed");
     std::shared_ptr<typename Flavor::VerificationKey> vk;
     if (vk_bytes.empty()) {
         info("WARNING: computing verification key while proving. Pass in a precomputed vk for better performance.");

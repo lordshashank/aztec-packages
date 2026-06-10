@@ -7,6 +7,7 @@
 #pragma once
 #include "barretenberg/common/assert.hpp"
 #include "barretenberg/common/log.hpp"
+#include "barretenberg/common/mem_checkpoint.hpp"
 #include "barretenberg/ext/starknet/flavor/ultra_starknet_flavor.hpp"
 #include "barretenberg/ext/starknet/flavor/ultra_starknet_zk_flavor.hpp"
 #include "barretenberg/flavor/flavor.hpp"
@@ -132,12 +133,16 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
             populate_memory_records(circuit);
 
             allocate_wires();
+            mem_cp("allocated wires");
 
             allocate_permutation_argument_polynomials();
+            mem_cp("allocated sigma/id");
 
             allocate_selectors(circuit);
+            mem_cp("allocated selectors");
 
             allocate_table_lookup_polynomials(circuit);
+            mem_cp("allocated table polys");
 
             allocate_lagrange_polynomials();
 
@@ -155,6 +160,7 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
         // Construct and add to proving key the wire, selector and copy constraint polynomials
         vinfo("populating trace...");
         Trace::populate(circuit, polynomials);
+        mem_cp("trace populated");
 
         {
             BB_BENCH_NAME("constructing prover instance after trace populate");
@@ -175,12 +181,14 @@ template <IsUltraOrMegaHonk Flavor_> class ProverInstance_ {
 
             construct_lookup_table_polynomials<Flavor>(polynomials.get_tables(), circuit);
         }
+        mem_cp("lookup table polys constructed");
 
         {
             BB_BENCH_NAME("constructing lookup read counts");
 
             construct_lookup_read_counts<Flavor>(polynomials.lookup_read_counts, polynomials.lookup_read_tags, circuit);
         }
+        mem_cp("lookup read counts constructed");
         { // Public inputs handling
             metadata.num_public_inputs = circuit.blocks.pub_inputs.size();
             metadata.pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
