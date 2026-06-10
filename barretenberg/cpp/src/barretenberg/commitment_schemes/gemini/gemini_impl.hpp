@@ -68,6 +68,9 @@ std::vector<typename GeminiProver_<Curve>::Claim> GeminiProver_<Curve>::prove(
 
     // Construct the d-1 Gemini foldings of A₀(X)
     std::vector<Polynomial> fold_polynomials = compute_fold_polynomials(log_n, multilinear_challenge, A_0);
+    // A₀ is fully consumed by the foldings; release its buffer before the partially-evaluated batch
+    // polynomials A₀₊/A₀₋ are allocated (they are derived from the batcher's internal F/G, not from A₀).
+    A_0 = Polynomial();
 
     // If virtual_log_n >= log_n, pad the fold commitments with dummy group elements [1]_1.
     for (size_t l = 0; l < virtual_log_n - 1; l++) {
