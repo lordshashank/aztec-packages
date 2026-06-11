@@ -23,6 +23,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace bb {
@@ -39,6 +40,24 @@ struct cycle_node {
 };
 
 using CyclicPermutation = std::vector<cycle_node>;
+
+/**
+ * @brief Flat (CSR-style) storage for all copy cycles: one contiguous node array plus per-cycle offsets.
+ * @details A vector-of-vectors layout costs one small heap chunk per variable (millions of ~32-byte
+ * allocations at 2^21), which both inflates the live footprint during trace population and leaves the
+ * arena fragmented after release. Two flat arrays hold the same data at 8 bytes/node + 4 bytes/cycle.
+ */
+class CopyCycles {
+  public:
+    std::vector<cycle_node> nodes; // all cycle nodes, grouped by cycle, block-order within each cycle
+    std::vector<uint32_t> offsets; // size() + 1 entries; cycle i occupies [offsets[i], offsets[i+1])
+
+    size_t size() const { return offsets.empty() ? 0 : offsets.size() - 1; }
+    std::span<const cycle_node> operator[](size_t cycle_idx) const
+    {
+        return { nodes.data() + offsets[cycle_idx], offsets[cycle_idx + 1] - offsets[cycle_idx] };
+    }
+};
 
 /**
  * @brief Compute Honk-style permutation sigma/id polynomials and add to prover_instance.
@@ -70,7 +89,7 @@ using CyclicPermutation = std::vector<cycle_node>;
 template <typename Flavor>
 void compute_permutation_argument_polynomials(const typename Flavor::CircuitBuilder& circuit,
                                               typename Flavor::ProverPolynomials& polynomials,
-                                              const std::vector<CyclicPermutation>& copy_cycles)
+                                              const CopyCycles& copy_cycles)
 {
     using FF = typename Flavor::FF;
     constexpr size_t NUM_WIRES = Flavor::NUM_WIRES;
@@ -120,7 +139,7 @@ void compute_permutation_argument_polynomials(const typename Flavor::CircuitBuil
         parallel_for_heuristic(
             copy_cycles.size(),
             [&](size_t cycle_idx) {
-                const CyclicPermutation& cycle = copy_cycles[cycle_idx];
+                const auto cycle = copy_cycles[cycle_idx];
                 const auto cycle_size = cycle.size();
                 if (cycle_size == 0) {
                     return;
@@ -187,7 +206,7 @@ void compute_permutation_argument_polynomials(const typename Flavor::CircuitBuil
 template <typename Flavor>
 void compute_permutation_argument_sidecars(const typename Flavor::CircuitBuilder& circuit,
                                            std::vector<CompressedIndexPolynomial>& sidecars,
-                                           const std::vector<CyclicPermutation>& copy_cycles,
+                                           const CopyCycles& copy_cycles,
                                            const size_t start_index,
                                            const size_t end_index)
 {
@@ -236,7 +255,7 @@ void compute_permutation_argument_sidecars(const typename Flavor::CircuitBuilder
         parallel_for_heuristic(
             copy_cycles.size(),
             [&](size_t cycle_idx) {
-                const CyclicPermutation& cycle = copy_cycles[cycle_idx];
+                const auto cycle = copy_cycles[cycle_idx];
                 const auto cycle_size = cycle.size();
                 if (cycle_size == 0) {
                     return;
