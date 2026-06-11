@@ -29,6 +29,10 @@ class PartiallyEvaluatedMultivariatesBase : public AllEntitiesBase {
     // static row-skip manifest; 0 means scan every row.
     size_t row_skip_active_prefix_end = 0;
 
+    // Default: all entities empty. Used by callers that allocate and fold entity-by-entity
+    // (see SumcheckProver::partially_evaluate_first_round) instead of allocating up front.
+    PartiallyEvaluatedMultivariatesBase() = default;
+
     /**
      * @brief Construct from full polynomials, allocating based on their actual sizes.
      * @details After the initial sumcheck round, the new size is CEIL(size/2).
