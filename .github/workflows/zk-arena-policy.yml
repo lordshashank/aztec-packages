@@ -1,0 +1,35 @@
+# zk-arena — advisory policy check on every PR (cheap, runs nothing from the PR).
+#
+# A submission may only touch the prover sources under barretenberg/cpp/src/barretenberg/**.
+# This check is advisory feedback for contributors: the authoritative policy check re-runs
+# from trusted context inside the maintainer-dispatched zk-arena-grade workflow.
+name: zk-arena-policy
+
+on:
+  pull_request:
+    branches: [zk-arena]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          sparse-checkout: zk-arena
+      - name: Touched-files policy
+        run: |
+          git fetch -q origin "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+          TOUCHED=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")
+          echo "Touched files:"; echo "$TOUCHED"
+          BAD=$(echo "$TOUCHED" | grep -vE '^barretenberg/cpp/src/barretenberg/' || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::Submission touches files outside barretenberg/cpp/src/barretenberg/ — not gradeable:"
+            echo "$BAD"
+            exit 1
+          fi
+          echo "policy OK — ask a maintainer to dispatch zk-arena-grade for this PR"
