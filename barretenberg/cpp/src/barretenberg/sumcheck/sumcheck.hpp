@@ -9,6 +9,7 @@
 #include "barretenberg/flavor/flavor_concepts.hpp"
 #include "barretenberg/flavor/multilinear_batching_flavor.hpp"
 #include "barretenberg/honk/library/grand_product_delta.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/polynomials/eq_polynomial.hpp"
 #include "barretenberg/polynomials/polynomial.hpp"
 #include "barretenberg/polynomials/polynomial_arithmetic.hpp"
@@ -694,16 +695,52 @@ template <typename Flavor> class SumcheckProver {
     };
 
     /**
+     * @brief Source polynomials to compress into a u32 sidecar and release right after this prover's
+     * first-round partial evaluation folds them into the book-keeping table. Configured by one-shot
+     * provers for the sigma/id polynomials: their only reads after the first fold are the Gemini
+     * batching pass, which the sidecar can serve at 4 bytes/element instead of 32. Empty by default
+     * (no behavior change for other users).
+     */
+    std::vector<std::pair<typename Flavor::Polynomial*, CompressedIndexPolynomial*>> compress_and_release_on_first_fold;
+
+    /**
      * @brief Initialize partially evaluated polynomials and perform first round of partial evaluation.
      * @details Creates PartiallyEvaluatedMultivariates from full polynomials and evaluates at the first round
-     * challenge.
+     * challenge. Allocation and folding are interleaved per entity so that sources registered in
+     * #compress_and_release_on_first_fold can be released the moment their folded image exists — the
+     * transient coexistence is then one entity's worth instead of the whole table's.
      * @return PartiallyEvaluatedMultivariates for use in subsequent rounds
      */
     PartiallyEvaluatedMultivariates partially_evaluate_first_round(ProverPolynomials& full_polynomials,
                                                                    const FF& round_challenge)
     {
-        PartiallyEvaluatedMultivariates partially_evaluated_polynomials(full_polynomials, multivariate_n);
-        partially_evaluate(full_polynomials, partially_evaluated_polynomials, round_challenge);
+        PartiallyEvaluatedMultivariates partially_evaluated_polynomials;
+        auto source_view = full_polynomials.get_all();
+        auto dest_view = partially_evaluated_polynomials.get_all();
+        const size_t pe_virtual_size = multivariate_n / 2;
+        parallel_for(source_view.size(), [&](size_t j) {
+            BB_BENCH_TRACY_NAME("Sumcheck::partially_evaluate");
+            auto& poly = source_view[j];
+            const size_t limit = poly.end_index();
+            const size_t desired_size = (limit / 2) + (limit % 2);
+            auto dest = typename Flavor::Polynomial(
+                desired_size, pe_virtual_size, 0, Flavor::Polynomial::DontZeroMemory::FLAG);
+            for (size_t i = 0; i < limit; i += 2) {
+                dest.at(i >> 1) = poly[i] + round_challenge * (poly[i + 1] - poly[i]);
+            }
+            dest.shrink_end_index(desired_size);
+            dest_view[j] = std::move(dest);
+            for (auto& [source_ptr, sidecar] : compress_and_release_on_first_fold) {
+                if (source_ptr == &poly) {
+                    *sidecar = CompressedIndexPolynomial::compress(poly);
+                    poly = typename Flavor::Polynomial{};
+                }
+            }
+        });
+        if constexpr (requires { full_polynomials.row_skip_active_prefix_end; }) {
+            partially_evaluated_polynomials.row_skip_active_prefix_end =
+                (full_polynomials.row_skip_active_prefix_end / 2) + (full_polynomials.row_skip_active_prefix_end % 2);
+        }
         return partially_evaluated_polynomials;
     }
 

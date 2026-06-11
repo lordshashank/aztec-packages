@@ -8,6 +8,7 @@
 #include "barretenberg/commitment_schemes/small_subgroup_ipa/small_subgroup_ipa.hpp"
 #include "barretenberg/flavor/mega_flavor.hpp"
 #include "barretenberg/flavor/ultra_flavor.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/honk/proof_system/types/proof.hpp"
 #include "barretenberg/sumcheck/sumcheck_output.hpp"
 #include "barretenberg/transcript/transcript.hpp"
@@ -52,6 +53,10 @@ template <typename Flavor_> class UltraProver_ {
     SumcheckOutput<Flavor> sumcheck_output;
     ZKData zk_sumcheck_data;
     CommitmentKey commitment_key;
+
+    // u32 sidecars (sigmas then ids) extracted when consume_polynomials releases the Fr originals
+    // after sumcheck's first-round fold; they serve the Gemini batching pass at 4 bytes/element.
+    std::vector<CompressedIndexPolynomial> sigma_id_sidecars;
 
     size_t virtual_log_n; // Set during gate challenge generation, reused by sumcheck and PCS
 

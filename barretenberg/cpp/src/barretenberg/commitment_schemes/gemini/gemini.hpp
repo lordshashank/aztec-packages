@@ -9,6 +9,7 @@
 #include "barretenberg/commitment_schemes/claim.hpp"
 #include "barretenberg/commitment_schemes/claim_batcher.hpp"
 #include "barretenberg/common/bb_bench.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/polynomials/polynomial.hpp"
 #include "barretenberg/transcript/transcript.hpp"
 
@@ -151,6 +152,11 @@ template <typename Curve> class GeminiProver_ {
         std::vector<std::pair<size_t, Polynomial>> unshifted_tails_;
         std::vector<std::pair<size_t, Polynomial>> shifted_tails_;
 
+        // Compressed u32-backed unshifted sources (sigma/id sidecars): their Fr originals were released
+        // after sumcheck's first-round fold; their batching contribution is re-derived here with the
+        // rho power of their original slot in the unshifted ordering. Pairs of (slot index, sidecar).
+        std::vector<std::pair<size_t, const CompressedIndexPolynomial*>> compressed_unshifted_;
+
         PolynomialBatcher(const size_t full_batched_size, const size_t actual_data_size = 0)
             : full_batched_size(full_batched_size)
             , actual_data_size_(actual_data_size == 0 ? full_batched_size : actual_data_size)
@@ -173,6 +179,11 @@ template <typename Curve> class GeminiProver_ {
         void add_shifted_tail(size_t batcher_index, Polynomial&& tail)
         {
             shifted_tails_.emplace_back(batcher_index, std::move(tail));
+        }
+
+        void add_compressed_unshifted(size_t batcher_index, const CompressedIndexPolynomial* sidecar)
+        {
+            compressed_unshifted_.emplace_back(batcher_index, sidecar);
         }
 
         /**
@@ -224,6 +235,16 @@ template <typename Curve> class GeminiProver_ {
             Fr unshifted_base(1);
             if (has_unshifted()) {
                 batch(batched_unshifted, unshifted);
+                // Accumulate the u32-backed sources (released sigma/id) with the rho power of their
+                // original slot. Values are identical to batching the Fr originals: decompress
+                // reproduces the exact field elements the permutation argument wrote.
+                for (const auto& [slot, sidecar] : compressed_unshifted_) {
+                    const Fr scalar = challenge.pow(slot);
+                    const size_t end = sidecar->end_index();
+                    for (size_t i = sidecar->start_index; i < end; ++i) {
+                        batched_unshifted.at(i) += scalar * sidecar->template decompress<Fr>(i);
+                    }
+                }
                 full_batched += batched_unshifted;
             }
             batch_tails(batched_unshifted_tail_, unshifted_tails_, unshifted_base);
