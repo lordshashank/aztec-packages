@@ -24,6 +24,7 @@
 namespace bb::scalar_multiplication::legacy {
 
 // Naive double-and-add fallback for small inputs (< PIPPENGER_THRESHOLD points).
+// (zk-arena dry-run: comment-only change to validate the grading pipeline end-to-end.)
 template <typename Curve> typename Curve::Element small_mul(const typename MSM<Curve>::MSMData& msm_data) noexcept
 {
     const auto& scalars = msm_data.scalars;
