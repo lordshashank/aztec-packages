@@ -11,6 +11,7 @@
 #include "./process_buckets.hpp"
 #include "./scalar_multiplication.hpp"
 #include "barretenberg/common/thread.hpp"
+#include "barretenberg/ecc/groups/booth_recode.hpp"
 #include "barretenberg/ecc/curves/bn254/bn254.hpp"
 #include "barretenberg/ecc/curves/grumpkin/grumpkin.hpp"
 #include "barretenberg/ecc/scalar_multiplication/scalar_multiplication.hpp"
@@ -271,6 +272,40 @@ template <typename Curve> uint32_t MSM<Curve>::get_optimal_log_num_buckets(const
     return best_bits;
 }
 
+template <typename Curve> uint32_t MSM<Curve>::get_optimal_slice_bits_signed(const size_t num_points) noexcept
+{
+    // Signed-Booth digits halve the bucket range: digits lie in [-2^(c-1), 2^(c-1)], so a round
+    // needs 2^(c-1)+1 buckets instead of 2^c, and ceil((NUM_BITS+1)/c) rounds cover the scalar
+    // (the +1 keeps the top digit non-negative). The cheaper bucket term shifts the optimum to
+    // wider windows (fewer rounds) than the unsigned model.
+    auto compute_cost = [&](uint32_t bits) {
+        size_t rounds = numeric::ceil_div(NUM_BITS_IN_FIELD + 1, static_cast<size_t>(bits));
+        size_t buckets = (size_t{ 1 } << (bits - 1)) + 1;
+        return rounds * (num_points + buckets * BUCKET_ACCUMULATION_COST);
+    };
+
+    uint32_t best_bits = 2;
+    size_t best_cost = compute_cost(2);
+    for (uint32_t bits = 3; bits < MAX_SLICE_BITS; ++bits) {
+        size_t cost = compute_cost(bits);
+        if (cost < best_cost) {
+            best_cost = cost;
+            best_bits = bits;
+        }
+    }
+
+    // Tuning override (analogous to BB_MSM_FAST/BB_MSM_LEGACY).
+    static const uint32_t env_override = []() -> uint32_t {
+        const char* env = std::getenv("BB_MSM_SLICE_BITS");
+        if (env == nullptr) {
+            return 0;
+        }
+        const int value = std::atoi(env);
+        return (value >= 2 && value < static_cast<int>(MAX_SLICE_BITS)) ? static_cast<uint32_t>(value) : 0;
+    }();
+    return env_override != 0 ? env_override : best_bits;
+}
+
 template <typename Curve> bool MSM<Curve>::use_affine_trick(const size_t num_points, const size_t num_buckets) noexcept
 {
     if (num_points < AFFINE_TRICK_THRESHOLD) {
@@ -349,7 +384,7 @@ typename Curve::Element MSM<Curve>::jacobian_pippenger_with_transformed_scalars(
 }
 
 template <typename Curve>
-typename Curve::Element MSM<Curve>::affine_pippenger_with_transformed_scalars(MSMData& msm_data) noexcept
+typename Curve::Element MSM<Curve>::affine_pippenger_unsigned_with_transformed_scalars(MSMData& msm_data) noexcept
 {
     const size_t num_points = msm_data.scalar_indices.size();
     const uint32_t bits_per_slice = get_optimal_log_num_buckets(num_points);
@@ -371,6 +406,7 @@ typename Curve::Element MSM<Curve>::affine_pippenger_with_transformed_scalars(MS
     for (uint32_t round = 0; round < num_rounds; ++round) {
         // Build point schedule for this round
         {
+            BB_BENCH_NAME("MSM::round_build_schedule");
             for (size_t i = 0; i < num_points; ++i) {
                 uint32_t idx = msm_data.scalar_indices[i];
                 uint32_t bucket_idx = get_scalar_slice(msm_data.scalars[idx], round, bits_per_slice);
@@ -379,23 +415,124 @@ typename Curve::Element MSM<Curve>::affine_pippenger_with_transformed_scalars(MS
         }
 
         // Sort by bucket and count zero-bucket entries
-        size_t num_zero_bucket_entries =
-            sort_point_schedule_and_count_zero_buckets(&msm_data.point_schedule[0], num_points, bits_per_slice);
+        size_t num_zero_bucket_entries = 0;
+        {
+            BB_BENCH_NAME("MSM::round_sort_schedule");
+            num_zero_bucket_entries =
+                sort_point_schedule_and_count_zero_buckets(&msm_data.point_schedule[0], num_points, bits_per_slice);
+        }
         size_t round_size = num_points - num_zero_bucket_entries;
 
         // Accumulate points into buckets
         Element bucket_result = Curve::Group::point_at_infinity;
         if (round_size > 0) {
             std::span<uint64_t> schedule(&msm_data.point_schedule[num_zero_bucket_entries], round_size);
-            batch_accumulate_points_into_buckets(schedule, msm_data.points, affine_data, bucket_data);
-            bucket_result = accumulate_buckets(bucket_data);
-            bucket_data.bucket_exists.clear();
+            {
+                BB_BENCH_NAME("MSM::round_accumulate");
+                batch_accumulate_points_into_buckets(schedule, msm_data.points, affine_data, bucket_data);
+            }
+            {
+                BB_BENCH_NAME("MSM::round_reduce");
+                bucket_result = accumulate_buckets(bucket_data);
+                bucket_data.bucket_exists.clear();
+            }
         }
 
         // Combine into running result
         uint32_t num_doublings = (round == num_rounds - 1 && remainder != 0) ? remainder : bits_per_slice;
         for (uint32_t i = 0; i < num_doublings; ++i) {
             msm_result.self_dbl();
+        }
+        msm_result += bucket_result;
+    }
+
+    return msm_result;
+}
+
+template <typename Curve>
+typename Curve::Element MSM<Curve>::affine_pippenger_with_transformed_scalars(MSMData& msm_data) noexcept
+{
+    static const bool force_unsigned = std::getenv("BB_MSM_UNSIGNED") != nullptr;
+    if (force_unsigned) {
+        return affine_pippenger_unsigned_with_transformed_scalars(msm_data);
+    }
+
+    const size_t num_points = msm_data.scalar_indices.size();
+    const uint32_t bits_per_slice = get_optimal_slice_bits_signed(num_points);
+    // Signed-Booth digits lie in [-2^(c-1), 2^(c-1)]; bucket index = |digit|, bucket 0 unused.
+    const size_t num_buckets = (size_t{ 1 } << (bits_per_slice - 1)) + 1;
+
+    if (!use_affine_trick(num_points, num_buckets)) {
+        return jacobian_pippenger_with_transformed_scalars(msm_data);
+    }
+
+    // LSB-aligned windows: window w covers scalar bits [w*c, (w+1)*c). ceil((NUM_BITS+1)/c)
+    // windows guarantee the top digit is non-negative (the recoding borrows at most one bit).
+    const uint32_t num_windows =
+        static_cast<uint32_t>(numeric::ceil_div(NUM_BITS_IN_FIELD + 1, static_cast<size_t>(bits_per_slice)));
+    constexpr size_t NUM_SCALAR_LIMBS = sizeof(typename Curve::ScalarField) / sizeof(uint64_t);
+
+    // One Booth slice descriptor per window, hoisted out of the per-point loop.
+    std::vector<ecc::booth::BoothSliceParams> window_params(num_windows);
+    for (uint32_t w = 0; w < num_windows; ++w) {
+        window_params[w] =
+            ecc::booth::compute_booth_slice_params(w * bits_per_slice, bits_per_slice, NUM_SCALAR_LIMBS);
+    }
+
+    // Per-call allocation for WASM compatibility (thread_local causes issues in WASM)
+    AffineAdditionData affine_data;
+    BucketAccumulators bucket_data(num_buckets);
+
+    Element msm_result = Curve::Group::point_at_infinity;
+
+    // Process windows MSB-first so the running result needs exactly c doublings between rounds.
+    for (uint32_t round = 0; round < num_windows; ++round) {
+        const auto& slice_params = window_params[num_windows - 1 - round];
+
+        // Build point schedule for this round. Zero digits are stored sign-cleared so the radix
+        // sort's zero-bucket count (which checks the full low word of the first sorted entry)
+        // treats them identically to unsigned zero slices.
+        {
+            BB_BENCH_NAME("MSM::round_build_schedule");
+            for (size_t i = 0; i < num_points; ++i) {
+                uint32_t idx = msm_data.scalar_indices[i];
+                uint32_t packed_digit =
+                    ecc::booth::booth_packed_digit(&msm_data.scalars[idx].data[0], slice_params, bits_per_slice);
+                packed_digit = (packed_digit & PointScheduleEntry::DIGIT_MAGNITUDE_MASK) != 0 ? packed_digit : 0;
+                BB_ASSERT_DEBUG((packed_digit & PointScheduleEntry::DIGIT_MAGNITUDE_MASK) < num_buckets);
+                msm_data.point_schedule[i] = PointScheduleEntry::create(idx, packed_digit).data;
+            }
+        }
+
+        // Sort by digit magnitude (the sign bit sits above the sorted bits) and count zero digits
+        size_t num_zero_bucket_entries = 0;
+        {
+            BB_BENCH_NAME("MSM::round_sort_schedule");
+            num_zero_bucket_entries =
+                sort_point_schedule_and_count_zero_buckets(&msm_data.point_schedule[0], num_points, bits_per_slice);
+        }
+        size_t round_size = num_points - num_zero_bucket_entries;
+
+        // Accumulate points into buckets
+        Element bucket_result = Curve::Group::point_at_infinity;
+        if (round_size > 0) {
+            std::span<uint64_t> schedule(&msm_data.point_schedule[num_zero_bucket_entries], round_size);
+            {
+                BB_BENCH_NAME("MSM::round_accumulate");
+                batch_accumulate_points_into_buckets(schedule, msm_data.points, affine_data, bucket_data);
+            }
+            {
+                BB_BENCH_NAME("MSM::round_reduce");
+                bucket_result = accumulate_buckets(bucket_data);
+                bucket_data.bucket_exists.clear();
+            }
+        }
+
+        // Combine into running result: all windows below the current one are full width c.
+        if (round != 0) {
+            for (uint32_t i = 0; i < bits_per_slice; ++i) {
+                msm_result.self_dbl();
+            }
         }
         msm_result += bucket_result;
     }
@@ -435,10 +572,12 @@ void MSM<Curve>::batch_accumulate_points_into_buckets(std::span<const uint64_t> 
             PointScheduleEntry lhs{ point_schedule[point_it] };
             PointScheduleEntry rhs{ point_schedule[point_it + 1] };
 
-            process_bucket_pair(lhs.bucket_index(),
-                                rhs.bucket_index(),
+            process_bucket_pair(lhs.digit_magnitude(),
+                                rhs.digit_magnitude(),
                                 &points[lhs.point_index()],
                                 &points[rhs.point_index()],
+                                lhs.digit_sign(),
+                                rhs.digit_sign(),
                                 affine_data,
                                 bucket_data,
                                 scratch_it,
@@ -448,8 +587,13 @@ void MSM<Curve>::batch_accumulate_points_into_buckets(std::span<const uint64_t> 
         // Handle the last point (odd count case) - separate to avoid bounds check on point_schedule[point_it + 1]
         if (point_it == last_index) {
             PointScheduleEntry last{ point_schedule[point_it] };
-            process_single_point(
-                last.bucket_index(), &points[last.point_index()], affine_data, bucket_data, scratch_it, point_it);
+            process_single_point(last.digit_magnitude(),
+                                 &points[last.point_index()],
+                                 last.digit_sign(),
+                                 affine_data,
+                                 bucket_data,
+                                 scratch_it,
+                                 point_it);
         }
 
         // Compute independent additions using Montgomery's batch inversion trick
@@ -471,10 +615,13 @@ void MSM<Curve>::batch_accumulate_points_into_buckets(std::span<const uint64_t> 
             uint32_t lhs_bucket = affine_data.addition_result_bucket_destinations[output_it];
             uint32_t rhs_bucket = affine_data.addition_result_bucket_destinations[output_it + 1];
 
+            // Recirculated addition outputs carry no sign: it was applied when the inputs entered.
             process_bucket_pair(lhs_bucket,
                                 rhs_bucket,
                                 &affine_output[output_it],
                                 &affine_output[output_it + 1],
+                                0,
+                                0,
                                 affine_data,
                                 bucket_data,
                                 new_scratch_it,
@@ -485,7 +632,7 @@ void MSM<Curve>::batch_accumulate_points_into_buckets(std::span<const uint64_t> 
         if (num_outputs > 0 && output_it == num_outputs - 1) {
             uint32_t bucket = affine_data.addition_result_bucket_destinations[output_it];
             process_single_point(
-                bucket, &affine_output[output_it], affine_data, bucket_data, new_scratch_it, output_it);
+                bucket, &affine_output[output_it], 0, affine_data, bucket_data, new_scratch_it, output_it);
         }
 
         // Continue with recirculated points
