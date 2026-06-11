@@ -1100,6 +1100,13 @@ int parse_and_run_cli_command(int argc, char* argv[])
                     vinfo("Perfetto aggregate trace written to ", trace_out_perfetto_aggregate);
                 }
 #endif
+                // --memory_profile_out enables checkpoint collection for every prove path, but the
+                // file was only written on the chonk branch; mirror it here so plain `prove` works.
+                if (!memory_profile_out.empty()) {
+                    std::ofstream file(memory_profile_out);
+                    bb::detail::GLOBAL_MEMORY_PROFILE.serialize_json(file);
+                    vinfo("Memory profile written to ", memory_profile_out);
+                }
                 return 0;
             }
             return execute_non_prove_command(api);
