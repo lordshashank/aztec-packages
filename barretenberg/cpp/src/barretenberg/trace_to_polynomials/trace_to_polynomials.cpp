@@ -19,9 +19,9 @@
 namespace bb {
 
 template <class Flavor>
-std::vector<CyclicPermutation> TraceToPolynomials<Flavor>::populate_wires_and_selectors(Builder& builder,
-                                                                                        ProverPolynomials& polynomials,
-                                                                                        bool consume_builder)
+CopyCycles TraceToPolynomials<Flavor>::populate_wires_and_selectors(Builder& builder,
+                                                                    ProverPolynomials& polynomials,
+                                                                    bool consume_builder)
 {
 
     BB_BENCH_NAME("construct_trace_data");
@@ -31,8 +31,10 @@ std::vector<CyclicPermutation> TraceToPolynomials<Flavor>::populate_wires_and_se
         consume_builder = false;
     }
 
-    std::vector<CyclicPermutation> copy_cycles;
-    copy_cycles.resize(builder.get_num_variables()); // at most one copy cycle per variable
+    // Flat CSR storage: at most one copy cycle per variable. The offsets are built from per-variable
+    // node counts; the nodes array is filled in phase 1.5 with per-cycle write cursors.
+    CopyCycles copy_cycles;
+    const size_t num_cycles = builder.get_num_variables();
 
     RefArray<Polynomial, NUM_WIRES> wires = polynomials.get_wires();
     auto selectors = polynomials.get_selectors();
@@ -42,26 +44,26 @@ std::vector<CyclicPermutation> TraceToPolynomials<Flavor>::populate_wires_and_se
     auto blocks_array = builder.blocks.get();
     const size_t num_blocks = blocks_array.size();
 
-    // Pre-pass: count copy-cycle sizes per real-variable index so each copy_cycles[i] can be
-    // reserve()d once before the serial concat in phase 1.5, avoiding repeated reallocations.
+    // Pre-pass: count copy-cycle sizes per real-variable index and turn them into CSR offsets.
     {
         BB_BENCH_NAME("counting copy_cycles");
-        std::vector<uint32_t> cycle_counts(builder.real_variable_index.size(), 0);
+        copy_cycles.offsets.assign(num_cycles + 1, 0);
         for (auto& block : blocks_array) {
             const uint32_t block_size = static_cast<uint32_t>(block.size());
             for (uint32_t block_row_idx = 0; block_row_idx < block_size; ++block_row_idx) {
                 for (uint32_t wire_idx = 0; wire_idx < NUM_WIRES; ++wire_idx) {
                     uint32_t var_idx = block.wires[wire_idx][block_row_idx];
                     // var_idx may be untrusted (e.g. from ACIR) so use .at() to catch OOB. This validates real_var_idx
-                    // as an in-range index for both cycle_counts and copy_cycles (same size), which is why phase 1.5
-                    // below can index copy_cycles[real_var_idx] without .at().
-                    ++cycle_counts.at(builder.real_variable_index.at(var_idx));
+                    // as an in-range index (offsets has num_cycles + 1 entries, real indices are < num_cycles), which
+                    // is why phase 1.5 below can index the cursor array without .at().
+                    ++copy_cycles.offsets.at(builder.real_variable_index.at(var_idx) + 1);
                 }
             }
         }
-        for (size_t i = 0; i < copy_cycles.size(); ++i) {
-            copy_cycles[i].reserve(cycle_counts[i]);
+        for (size_t i = 1; i <= num_cycles; ++i) {
+            copy_cycles.offsets[i] += copy_cycles.offsets[i - 1];
         }
+        copy_cycles.nodes.resize(copy_cycles.offsets[num_cycles]);
     }
 
     // Phase 1: per-block parallel pass over wires and emit copy-cycle nodes.
@@ -97,12 +99,13 @@ std::vector<CyclicPermutation> TraceToPolynomials<Flavor>::populate_wires_and_se
         });
     }
 
-    // Phase 1.5: Serial concat in block order to preserve cycle-node ordering within each variable's cycle list.
+    // Phase 1.5: Serial fill in block order to preserve cycle-node ordering within each variable's cycle list.
     {
         BB_BENCH_NAME("fill_copy_cycles");
+        std::vector<uint32_t> cursors(copy_cycles.offsets.begin(), copy_cycles.offsets.end() - 1);
         for (const auto& block_nodes : per_block_nodes) {
             for (const auto& [real_var_idx, node] : block_nodes) {
-                copy_cycles[real_var_idx].emplace_back(node);
+                copy_cycles.nodes[cursors[real_var_idx]++] = node;
             }
         }
     }

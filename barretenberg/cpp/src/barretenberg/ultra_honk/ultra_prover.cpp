@@ -113,6 +113,26 @@ template <typename Flavor> void UltraProver_<Flavor>::execute_sumcheck_iop()
                       prover_instance->relation_parameters,
                       virtual_log_n);
 
+    if (consume_polynomials) {
+        // After the first-round fold, the sigma/id originals' only remaining read is the Gemini
+        // batching pass; have sumcheck release the Fr backing (~48 MiB each at 2^21) the moment
+        // their folded image exists. The u32 sidecars usually already exist from PK construction
+        // (consume_circuit); otherwise sumcheck extracts them before releasing.
+        auto& sidecars = prover_instance->sigma_id_sidecars;
+        auto sigmas = prover_instance->polynomials.get_sigmas();
+        auto ids = prover_instance->polynomials.get_ids();
+        if (sidecars.size() != sigmas.size() + ids.size()) {
+            sidecars.assign(sigmas.size() + ids.size(), {});
+        }
+        size_t sidecar_idx = 0;
+        for (size_t i = 0; i < sigmas.size(); ++i) {
+            sumcheck.compress_and_release_on_first_fold.emplace_back(&sigmas[i], &sidecars[sidecar_idx++]);
+        }
+        for (size_t i = 0; i < ids.size(); ++i) {
+            sumcheck.compress_and_release_on_first_fold.emplace_back(&ids[i], &sidecars[sidecar_idx++]);
+        }
+    }
+
     if constexpr (Flavor::HasZK) {
         // Generate libra univariates for ALL rounds (real + virtual) so that the ZK and non-ZK
         // virtual round paths are unified. The libra contributes to every round uniformly.
@@ -135,7 +155,15 @@ template <typename Flavor> void UltraProver_<Flavor>::execute_pcs()
 
     auto& ck = commitment_key;
 
-    PolynomialBatcher polynomial_batcher(prover_instance->dyadic_size(), prover_instance->polynomials.max_end_index());
+    // The sigma/id entities may have been released after sumcheck's first-round fold (their data now
+    // lives in u32 sidecars), in which case max_end_index() no longer covers them — extend the actual
+    // data size so the batched accumulator spans the sidecar region too.
+    const auto& sidecars = prover_instance->sigma_id_sidecars;
+    size_t actual_data_size = prover_instance->polynomials.max_end_index();
+    for (const auto& sidecar : sidecars) {
+        actual_data_size = std::max(actual_data_size, sidecar.end_index());
+    }
+    PolynomialBatcher polynomial_batcher(prover_instance->dyadic_size(), actual_data_size);
     polynomial_batcher.set_unshifted(prover_instance->polynomials.get_unshifted());
     polynomial_batcher.set_to_be_shifted_by_one(prover_instance->polynomials.get_to_be_shifted());
     if (consume_polynomials) {
@@ -145,6 +173,26 @@ template <typename Flavor> void UltraProver_<Flavor>::execute_pcs()
             poly = Polynomial<FF>{};
         }
         polynomial_batcher.set_consume_sources(true);
+    }
+    if (!sidecars.empty()) {
+        // Re-register the released sigma/id sources by their slot in the unshifted ordering, so their
+        // batching contribution lands with exactly the rho power their Fr originals would have used.
+        auto unshifted = prover_instance->polynomials.get_unshifted();
+        auto sigmas = prover_instance->polynomials.get_sigmas();
+        auto ids = prover_instance->polynomials.get_ids();
+        for (size_t slot = 0; slot < unshifted.size(); ++slot) {
+            const Polynomial<FF>* address = &unshifted[slot];
+            for (size_t i = 0; i < sigmas.size(); ++i) {
+                if (address == &sigmas[i]) {
+                    polynomial_batcher.add_compressed_unshifted(slot, &sidecars[i]);
+                }
+            }
+            for (size_t i = 0; i < ids.size(); ++i) {
+                if (address == &ids[i]) {
+                    polynomial_batcher.add_compressed_unshifted(slot, &sidecars[sigmas.size() + i]);
+                }
+            }
+        }
     }
 
     OpeningClaim prover_opening_claim;
