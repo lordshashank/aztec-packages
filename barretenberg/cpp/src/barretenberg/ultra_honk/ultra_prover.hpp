@@ -40,6 +40,11 @@ template <typename Flavor_> class UltraProver_ {
     size_t log_dyadic_size() const { return prover_instance->log_dyadic_size(); }
     const std::shared_ptr<Transcript>& get_transcript() const { return transcript; }
 
+    // If set (one-shot prove paths), the prover polynomials are released during the PCS phase once the
+    // Gemini batching pass — their last read — is done, so they don't sit under the PCS-phase memory peak.
+    // Callers that use the instance's polynomials after construct_proof() must leave this off.
+    bool consume_polynomials = false;
+
   private:
     std::shared_ptr<ProverInstance> prover_instance;
     std::shared_ptr<Transcript> transcript;
