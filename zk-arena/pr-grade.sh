@@ -43,7 +43,34 @@ export ZKARENA_MACHINE
 cd "$REPO_DIR"
 BASE_SHA=$(git rev-parse HEAD)
 HEAD_SHA=$(git rev-parse pr-head)
-MERGE_SHA=$(git rev-parse pr-merge)
+
+# Construct the candidate merge LOCALLY instead of trusting GitHub's pull/N/merge ref:
+# that ref is recomputed lazily and can stay stale for minutes after the base branch moves
+# (merge + record-bot commit), which previously made the policy diff blame the PR for the
+# base's own files. A local merge is always against the exact tip being graded.
+git config user.name "zk-arena-grader"
+git config user.email "grader@users.noreply.github.com"
+
+# CI checkouts are shallow (depth 1): deepen until the tip and the PR head share a merge
+# base, or the local merge below would fail with "refusing to merge unrelated histories".
+attempt=0
+until git merge-base "$BASE_SHA" pr-head >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -gt 12 ]; then
+    echo "FATAL: no common history between the tip and PR #$PR's head after deepening — is the PR based on this branch?" >&2
+    exit 4
+  fi
+  echo "deepening history to find the merge base (attempt $attempt)..."
+  git fetch -q --deepen=100 origin zk-arena "pull/$PR/head" || true
+done
+
+git checkout -q -B grade-candidate "$BASE_SHA"
+if ! git merge --no-ff --no-edit -q pr-head; then
+  echo "FATAL: PR #$PR does not merge cleanly into the current tip ($BASE_SHA) — rebase the PR and re-run." >&2
+  exit 4
+fi
+MERGE_SHA=$(git rev-parse HEAD)
+git checkout -q "$BASE_SHA" 2>/dev/null || git checkout -q --detach "$BASE_SHA"
 jq -n --arg pr "$PR" --arg base "$BASE_SHA" --arg head "$HEAD_SHA" --arg merge "$MERGE_SHA" --arg machine "$ZKARENA_MACHINE" \
   '{pr: $pr, baseSha: $base, headSha: $head, mergeSha: $merge, machine: $machine}' > "$OUT/meta.json"
 
@@ -51,7 +78,7 @@ jq -n --arg pr "$PR" --arg base "$BASE_SHA" --arg head "$HEAD_SHA" --arg merge "
 # A submission may only touch the prover sources. Everything else (grader, workflows,
 # problem assets, build config) is maintainer-owned.
 ALLOWED='^barretenberg/cpp/src/barretenberg/'
-TOUCHED=$(git diff --name-only "$BASE_SHA" pr-merge)
+TOUCHED=$(git diff --name-only "$BASE_SHA" "$MERGE_SHA")
 VIOLATIONS=$(echo "$TOUCHED" | grep -vE "$ALLOWED" || true)
 if [ -n "$VIOLATIONS" ]; then
   jq -n --arg v "$VIOLATIONS" '{ok: false, violations: ($v | split("\n"))}' > "$OUT/policy.json"
@@ -83,7 +110,7 @@ node "$ARENA_DIR/grade.mjs" --stack=base --bb=/tmp/wt-base/barretenberg/cpp/buil
 
 # ---- Build + grade the CANDIDATE (PR merged into the tip) ----
 echo "== building candidate (merge ${MERGE_SHA:0:10}) =="
-git worktree add --detach /tmp/wt-cand pr-merge
+git worktree add --detach /tmp/wt-cand "$MERGE_SHA"
 build_bb /tmp/wt-cand || exit 1
 echo "== grading candidate ($RUNS runs) =="
 node "$ARENA_DIR/grade.mjs" --stack=candidate --bb=/tmp/wt-cand/barretenberg/cpp/build/bin/bb \

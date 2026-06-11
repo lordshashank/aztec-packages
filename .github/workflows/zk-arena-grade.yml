@@ -44,9 +44,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: zk-arena
-      - name: Fetch PR refs
+      - name: Fetch PR head
         run: |
-          git fetch origin "pull/${{ inputs.pr }}/head:pr-head" "pull/${{ inputs.pr }}/merge:pr-merge"
+          git fetch origin "pull/${{ inputs.pr }}/head:pr-head"
       - uses: actions/cache@v4
         with:
           path: ~/bb-baseline
@@ -81,9 +81,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: zk-arena
-      - name: Fetch PR refs
+      - name: Fetch PR head
         run: |
-          git fetch origin "pull/${{ inputs.pr }}/head:pr-head" "pull/${{ inputs.pr }}/merge:pr-merge"
+          git fetch origin "pull/${{ inputs.pr }}/head:pr-head"
       - uses: actions/cache@v4
         with:
           path: ~/bb-baseline
