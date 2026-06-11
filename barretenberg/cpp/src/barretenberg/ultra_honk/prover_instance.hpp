@@ -60,6 +60,10 @@ template <typename Flavor_> class ProverInstance_ {
     // originals and serve the Gemini batching pass from these (see UltraProver_::consume_polynomials).
     std::vector<CompressedIndexPolynomial> sigma_id_sidecars;
 
+    // Whether this instance consumed its circuit during construction (one-shot prove path). Gates the
+    // memory-peak optimizations: deferred z_perm allocation (done lazily at the grand product) etc.
+    bool consumed_circuit = false;
+
     size_t dyadic_size() const { return metadata.dyadic_size; }
     size_t log_dyadic_size() const { return numeric::get_msb(dyadic_size()); }
     size_t pub_inputs_offset() const { return metadata.pub_inputs_offset; }
