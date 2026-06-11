@@ -138,6 +138,14 @@ template <typename Flavor> void UltraProver_<Flavor>::execute_pcs()
     PolynomialBatcher polynomial_batcher(prover_instance->dyadic_size(), prover_instance->polynomials.max_end_index());
     polynomial_batcher.set_unshifted(prover_instance->polynomials.get_unshifted());
     polynomial_batcher.set_to_be_shifted_by_one(prover_instance->polynomials.get_to_be_shifted());
+    if (consume_polynomials) {
+        // Sumcheck is done: the shifted entities are views aliasing the to-be-shifted polynomials' backing
+        // memory and have no further reads — drop them now so the batcher's source release actually frees.
+        for (auto& poly : prover_instance->polynomials.get_shifted()) {
+            poly = Polynomial<FF>{};
+        }
+        polynomial_batcher.set_consume_sources(true);
+    }
 
     OpeningClaim prover_opening_claim;
     if constexpr (!Flavor::HasZK) {

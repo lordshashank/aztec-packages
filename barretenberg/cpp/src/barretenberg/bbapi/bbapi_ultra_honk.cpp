@@ -81,6 +81,9 @@ CircuitProve::Response _prove(std::vector<uint8_t>&& bytecode,
 
     // Construct proof
     UltraProver_<Flavor> prover{ prover_instance, vk };
+    // One-shot prove: the instance's polynomials have no readers after their last use inside the PCS,
+    // so let the prover release them as it goes (same rationale as consume_circuit above).
+    prover.consume_polynomials = true;
     Proof full_proof = prover.construct_proof();
 
     // Compute where to split (inner public inputs vs everything else)
