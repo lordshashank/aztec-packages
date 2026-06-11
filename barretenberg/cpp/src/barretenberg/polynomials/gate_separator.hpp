@@ -23,11 +23,16 @@ template <typename FF> struct GateSeparatorPolynomial {
     std::vector<FF> betas;
 
     /**
-     * @brief The consecutive evaluations \f$ pow_{\ell}(\beta) =  pow_{\beta}(\vec \ell) \f$ for \f$\vec \ell\f$
-     * identified with the integers \f$\ell = 0,\ldots, 2^d-1\f$
-     *
+     * @brief Split-table representation of the consecutive evaluations \f$ pow_{\ell}(\beta) \f$ for
+     * \f$\ell = 0,\ldots, 2^d-1\f$ (Dao–Thaler split-eq): \f$ pow_{\ell}(\beta) =
+     * pow_{\ell \bmod 2^{d_{lo}}}(\beta_{<d_{lo}}) \cdot pow_{\lfloor \ell / 2^{d_{lo}} \rfloor}(\beta_{\geq
+     * d_{lo}})\f$, so two tables of \f$2^{d_{lo}}\f$ and \f$2^{d-d_{lo}}\f$ entries replace one of \f$2^d\f$
+     * (64 MiB at \f$d=21\f$ down to ~100 KB) at the cost of one extra multiplication per lookup. The tables
+     * also stay L1/L2-resident, where the monolithic table was streamed from DRAM.
      */
-    Polynomial<FF> beta_products;
+    Polynomial<FF> beta_products_lo;
+    Polynomial<FF> beta_products_hi;
+    size_t lo_bits = 0;
     /**
      * @brief In Round \f$ i\f$ of Sumcheck, it points to the \f$ i \f$-th element in \f$ \vec \beta \f$
      *
@@ -56,8 +61,19 @@ template <typename FF> struct GateSeparatorPolynomial {
      */
     GateSeparatorPolynomial(const std::vector<FF>& betas, const size_t log_num_monomials)
         : betas(betas)
-        , beta_products(compute_beta_products(betas, log_num_monomials))
-    {}
+        , lo_bits(log_num_monomials / 2)
+    {
+        if (betas.empty()) {
+            beta_products_lo = compute_beta_products(betas, 0);
+            beta_products_hi = compute_beta_products(betas, 0);
+            return;
+        }
+        const std::vector<FF> betas_lo(betas.begin(), betas.begin() + static_cast<std::ptrdiff_t>(lo_bits));
+        const std::vector<FF> betas_hi(betas.begin() + static_cast<std::ptrdiff_t>(lo_bits),
+                                       betas.begin() + static_cast<std::ptrdiff_t>(log_num_monomials));
+        beta_products_lo = compute_beta_products(betas_lo, lo_bits);
+        beta_products_hi = compute_beta_products(betas_hi, log_num_monomials - lo_bits);
+    }
 
     /**
      * @brief Construct a new GateSeparatorPolynomial object without expanding to a vector of monomials
@@ -85,16 +101,20 @@ template <typename FF> struct GateSeparatorPolynomial {
     }
 
     /**
-     * @brief Retruns the element in #beta_products at place #idx.
+     * @brief Returns \f$ pow_{\ell}(\beta) \f$ for the monomial index identified by #idx and the current round,
+     * reconstructed as the product of the two split-table entries.
      *
      * @param idx
-     * @return FF const&
+     * @return FF
      */
-    FF const& operator[](size_t idx) const
+    FF operator[](size_t idx) const
     {
         // At round i, we only iterate over beta_products of indices that are multiples of 2^i,
-        // Hence for the idx-th element we need to get the (idx * 2^i)-th element in #beta_products.
-        return beta_products.at((idx >> 1) * periodicity);
+        // Hence for the idx-th element we need the (idx * 2^i)-th product, split across the two tables.
+        const size_t full_idx = (idx >> 1) * periodicity;
+        const size_t lo_idx = full_idx & ((size_t{ 1 } << lo_bits) - 1);
+        const size_t hi_idx = full_idx >> lo_bits;
+        return beta_products_lo.at(lo_idx) * beta_products_hi.at(hi_idx);
     }
     /**
      * @brief Computes the component  at index #current_element_idx in #betas.

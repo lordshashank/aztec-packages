@@ -8,6 +8,7 @@
 #include "barretenberg/commitment_schemes/small_subgroup_ipa/small_subgroup_ipa.hpp"
 #include "barretenberg/flavor/mega_flavor.hpp"
 #include "barretenberg/flavor/ultra_flavor.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/honk/proof_system/types/proof.hpp"
 #include "barretenberg/sumcheck/sumcheck_output.hpp"
 #include "barretenberg/transcript/transcript.hpp"
@@ -39,6 +40,11 @@ template <typename Flavor_> class UltraProver_ {
     size_t num_public_inputs() const { return prover_instance->num_public_inputs(); }
     size_t log_dyadic_size() const { return prover_instance->log_dyadic_size(); }
     const std::shared_ptr<Transcript>& get_transcript() const { return transcript; }
+
+    // If set (one-shot prove paths), the prover polynomials are released during the PCS phase once the
+    // Gemini batching pass — their last read — is done, so they don't sit under the PCS-phase memory peak.
+    // Callers that use the instance's polynomials after construct_proof() must leave this off.
+    bool consume_polynomials = false;
 
   private:
     std::shared_ptr<ProverInstance> prover_instance;

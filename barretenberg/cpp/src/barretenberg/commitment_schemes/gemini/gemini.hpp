@@ -9,6 +9,7 @@
 #include "barretenberg/commitment_schemes/claim.hpp"
 #include "barretenberg/commitment_schemes/claim_batcher.hpp"
 #include "barretenberg/common/bb_bench.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/polynomials/polynomial.hpp"
 #include "barretenberg/transcript/transcript.hpp"
 
@@ -129,6 +130,10 @@ template <typename Curve> class GeminiProver_ {
 
         size_t full_batched_size = 0; // size of the full batched polynomial (generally the circuit size)
         size_t actual_data_size_ = 0; // max end_index across all polynomials (actual data extent)
+        // If set, the source polynomials are released (backing memory freed) at the end of compute_batched —
+        // the batching pass is their last read in a one-shot prove. Opt-in: callers that reuse the
+        // polynomials after proving (folding, tests) must leave this off.
+        bool consume_sources_ = false;
 
         Polynomial batched_unshifted;            // linear combination of unshifted polynomials
         Polynomial batched_to_be_shifted_by_one; // linear combination of to-be-shifted polynomials
@@ -147,6 +152,11 @@ template <typename Curve> class GeminiProver_ {
         std::vector<std::pair<size_t, Polynomial>> unshifted_tails_;
         std::vector<std::pair<size_t, Polynomial>> shifted_tails_;
 
+        // Compressed u32-backed unshifted sources (sigma/id sidecars): their Fr originals were released
+        // after sumcheck's first-round fold; their batching contribution is re-derived here with the
+        // rho power of their original slot in the unshifted ordering. Pairs of (slot index, sidecar).
+        std::vector<std::pair<size_t, const CompressedIndexPolynomial*>> compressed_unshifted_;
+
         PolynomialBatcher(const size_t full_batched_size, const size_t actual_data_size = 0)
             : full_batched_size(full_batched_size)
             , actual_data_size_(actual_data_size == 0 ? full_batched_size : actual_data_size)
@@ -160,6 +170,7 @@ template <typename Curve> class GeminiProver_ {
         // Set references to the polynomials to be batched
         void set_unshifted(RefVector<Polynomial> polynomials) { unshifted = polynomials; }
         void set_to_be_shifted_by_one(RefVector<Polynomial> polynomials) { to_be_shifted_by_one = polynomials; }
+        void set_consume_sources(bool consume) { consume_sources_ = consume; }
 
         void add_unshifted_tail(size_t batcher_index, Polynomial&& tail)
         {
@@ -168,6 +179,11 @@ template <typename Curve> class GeminiProver_ {
         void add_shifted_tail(size_t batcher_index, Polynomial&& tail)
         {
             shifted_tails_.emplace_back(batcher_index, std::move(tail));
+        }
+
+        void add_compressed_unshifted(size_t batcher_index, const CompressedIndexPolynomial* sidecar)
+        {
+            compressed_unshifted_.emplace_back(batcher_index, sidecar);
         }
 
         /**
@@ -219,6 +235,16 @@ template <typename Curve> class GeminiProver_ {
             Fr unshifted_base(1);
             if (has_unshifted()) {
                 batch(batched_unshifted, unshifted);
+                // Accumulate the u32-backed sources (released sigma/id) with the rho power of their
+                // original slot. Values are identical to batching the Fr originals: decompress
+                // reproduces the exact field elements the permutation argument wrote.
+                for (const auto& [slot, sidecar] : compressed_unshifted_) {
+                    const Fr scalar = challenge.pow(slot);
+                    const size_t end = sidecar->end_index();
+                    for (size_t i = sidecar->start_index; i < end; ++i) {
+                        batched_unshifted.at(i) += scalar * sidecar->template decompress<Fr>(i);
+                    }
+                }
                 full_batched += batched_unshifted;
             }
             batch_tails(batched_unshifted_tail_, unshifted_tails_, unshifted_base);
@@ -234,6 +260,20 @@ template <typename Curve> class GeminiProver_ {
             batch_tails(batched_shifted_tail_, shifted_tails_, shifted_base);
             if (!batched_shifted_tail_.is_empty()) {
                 full_batched += batched_shifted_tail_.shifted();
+            }
+
+            // The batching pass above is the last read of the source polynomials; everything downstream
+            // (folds, A₀₊/A₀₋, Shplonk, KZG) works off the batched accumulators. Release the sources now so
+            // their memory does not sit under the PCS-phase peak. The to-be-shifted set aliases entries of
+            // the unshifted set (wires/z_perm are opened both ways), so freeing happens only after both
+            // batching passes; double-release of the same entity is a harmless no-op.
+            if (consume_sources_) {
+                for (auto& poly : unshifted) {
+                    poly = Polynomial{};
+                }
+                for (auto& poly : to_be_shifted_by_one) {
+                    poly = Polynomial{};
+                }
             }
 
             return full_batched;

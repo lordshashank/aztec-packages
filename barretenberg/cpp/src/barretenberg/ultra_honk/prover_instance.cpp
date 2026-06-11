@@ -17,12 +17,21 @@
 #include "barretenberg/stdlib_circuit_builders/ultra_circuit_builder.hpp"
 #include "barretenberg/trace_to_polynomials/trace_to_polynomials.hpp"
 
+#if defined(__GLIBC__) && !defined(__wasm__)
+#include <malloc.h>
+#endif
+
 namespace bb {
 
-template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& circuit)
+template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& circuit, bool consume_circuit)
 {
     BB_BENCH_NAME("ProverInstance(Circuit&)");
     vinfo("Constructing ProverInstance");
+
+    if constexpr (IsMegaFlavor<Flavor>) {
+        consume_circuit = false; // Mega requires builder data (databus, ecc op) throughout construction
+    }
+    consumed_circuit = consume_circuit;
 
     // Check pairing point tagging: either no pairing points were created,
     // or all pairing points have been aggregated into a single equivalence class
@@ -41,6 +50,15 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
         if (!circuit.circuit_finalized) {
             circuit.finalize_circuit();
         }
+        if (consume_circuit) {
+            // The circuit is finalized: the bookkeeping that exists only to support gate creation/finalization can
+            // be released now, ahead of the large polynomial allocations below.
+            circuit.rom_ram_logic = typename Circuit::RomRamLogic{};
+            circuit.range_lists.clear();
+            circuit.constant_variable_indices.clear();
+            decltype(circuit.cached_partial_non_native_field_multiplications)().swap(
+                circuit.cached_partial_non_native_field_multiplications);
+        }
         // Compute block offsets before dyadic size so that compute_dyadic_size can account for the lookup table offset
         circuit.blocks.compute_offsets(TRACE_OFFSET);
         metadata.dyadic_size = compute_dyadic_size(circuit);
@@ -53,20 +71,137 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
         }
     }
 
+    // The polynomials are allocated in stages, interleaved with the population steps that consume the corresponding
+    // circuit data: this way, when the circuit is consumed, the memory of circuit data that has already been
+    // transferred into polynomials can be reused for subsequent allocations instead of growing the peak (the builder
+    // and the full set of polynomials never coexist).
     {
         BB_BENCH_NAME("allocating polynomials");
-        vinfo("allocating polynomials object in prover instance...");
+        vinfo("allocating wire and selector polynomials...");
 
         populate_memory_records(circuit);
+        if (consume_circuit) {
+            // The memory records have been copied (with offsets) into this instance; the circuit's copies are no
+            // longer needed.
+            std::vector<uint32_t>().swap(circuit.memory_read_records);
+            std::vector<uint32_t>().swap(circuit.memory_write_records);
+        }
+
         allocate_wires();
-        allocate_permutation_argument_polynomials();
         allocate_selectors(circuit);
-        allocate_table_lookup_polynomials(circuit);
-        allocate_lagrange_polynomials();
 
         if constexpr (IsMegaFlavor<Flavor>) {
             allocate_ecc_op_polynomials(circuit);
         }
+    }
+
+    // Populate the wire and selector polynomials and compute the copy cycles; under consume_circuit this
+    // progressively releases the circuit's gate data and witness values.
+    vinfo("populating trace...");
+    {
+        CopyCycles copy_cycles =
+            TraceToPolynomials<Flavor>::populate_wires_and_selectors(circuit, polynomials, consume_circuit);
+
+        if (consume_circuit) {
+            // The wide selectors (allocated over the whole active range because they span several gate
+            // blocks) are typically zero outside the blocks that use them — e.g. a Poseidon2-heavy trace
+            // leaves q_m entirely zero and q_c/q_r/q_o/q_4 mostly zero. Trim each to its
+            // [first_nonzero, last_nonzero] support: reads outside the window hit the polynomial's
+            // virtual zeros, so every consumer sees identical values while the dead backing is freed.
+            {
+                BB_BENCH_NAME("trim_wide_selector_supports");
+                auto trim_to_support = [&](Polynomial& poly) {
+                    const size_t start = poly.start_index();
+                    const size_t end = poly.end_index();
+                    size_t first_nonzero = end;
+                    size_t last_nonzero = start;
+                    for (size_t i = start; i < end; ++i) {
+                        if (!poly[i].is_zero()) {
+                            first_nonzero = std::min(first_nonzero, i);
+                            last_nonzero = i;
+                        }
+                    }
+                    if (first_nonzero == end) { // all zero: keep a minimal stub with full virtual size
+                        poly = Polynomial(1, dyadic_size(), 0);
+                        return;
+                    }
+                    const size_t support = last_nonzero + 1 - first_nonzero;
+                    if (support + 4096 >= end - start) { // not worth a copy for a few pages
+                        return;
+                    }
+                    Polynomial trimmed(support, dyadic_size(), first_nonzero);
+                    for (size_t i = first_nonzero; i <= last_nonzero; ++i) {
+                        trimmed.at(i) = poly[i];
+                    }
+                    poly = std::move(trimmed);
+                };
+                trim_to_support(polynomials.q_m);
+                trim_to_support(polynomials.q_c);
+                trim_to_support(polynomials.q_l);
+                trim_to_support(polynomials.q_r);
+                trim_to_support(polynomials.q_o);
+                trim_to_support(polynomials.q_4);
+            }
+            // Compute the permutation argument on u32 sidecars first (sigma/id values are small signed
+            // indices), so the copy-cycle and tag/tau data can be dropped BEFORE the ~8x larger Fr images
+            // are materialized — the two never coexist, which keeps the PK-construction transient from
+            // setting the process peak.
+            {
+                BB_BENCH_NAME("compute_permutation_argument_polynomials");
+                compute_permutation_argument_sidecars<Flavor>(
+                    circuit, sigma_id_sidecars, copy_cycles, NUM_ZERO_ROWS, trace_active_range_size());
+            }
+            circuit.release_permutation_data();
+            copy_cycles = {};
+
+#if defined(__GLIBC__) && !defined(__wasm__)
+            // The consumed builder/cycle memory was freed in small chunks that glibc retains in the
+            // arena, while the sigma/id materialization below allocates large blocks that go to fresh
+            // mmaps — the retained pages and the new blocks would stack up in peak RSS. Return the
+            // free arena pages to the OS before the climb.
+            malloc_trim(0);
+#endif
+
+            allocate_permutation_argument_polynomials();
+            {
+                BB_BENCH_NAME("materialize_permutation_argument_polynomials");
+                auto sigmas = polynomials.get_sigmas();
+                auto ids = polynomials.get_ids();
+                const size_t domain_size = trace_active_range_size() - NUM_ZERO_ROWS;
+                const MultithreadData thread_data = calculate_thread_data(domain_size);
+                for (size_t wire_idx = 0; wire_idx < sigmas.size(); ++wire_idx) {
+                    auto& sigma = sigmas[wire_idx];
+                    auto& id = ids[wire_idx];
+                    const auto& sigma_sidecar = sigma_id_sidecars[wire_idx];
+                    const auto& id_sidecar = sigma_id_sidecars[sigmas.size() + wire_idx];
+                    parallel_for(thread_data.num_threads, [&](size_t j) {
+                        for (size_t i = thread_data.start[j]; i < thread_data.end[j]; ++i) {
+                            const size_t poly_idx = i + NUM_ZERO_ROWS;
+                            sigma.at(poly_idx) = sigma_sidecar.template decompress<FF>(poly_idx);
+                            id.at(poly_idx) = id_sidecar.template decompress<FF>(poly_idx);
+                        }
+                    });
+                }
+            }
+        } else {
+            // Allocate the permutation argument polynomials only now: under consume_circuit this reuses the
+            // memory released by the circuit's gate data instead of growing the peak.
+            allocate_permutation_argument_polynomials();
+
+            // Compute the permutation argument polynomials (sigma/id) and add them to proving key
+            {
+                BB_BENCH_NAME("compute_permutation_argument_polynomials");
+
+                compute_permutation_argument_polynomials<Flavor>(circuit, polynomials, copy_cycles);
+            }
+        }
+    }
+
+    {
+        BB_BENCH_NAME("allocating table/lagrange polynomials");
+
+        allocate_table_lookup_polynomials(circuit);
+        allocate_lagrange_polynomials();
         if constexpr (HasDataBus<Flavor>) {
             allocate_databus_polynomials(circuit);
         }
@@ -79,10 +214,6 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
         detail::GLOBAL_MEMORY_PROFILE.add_checkpoint("after_alloc");
     }
 
-    // Construct and add to proving key the wire, selector and copy constraint polynomials
-    vinfo("populating trace...");
-    TraceToPolynomials<Flavor>::populate(circuit, polynomials);
-
     if constexpr (IsMegaFlavor<Flavor>) {
         BB_BENCH_NAME("constructing databus polynomials");
         construct_databus_polynomials(circuit);
@@ -93,8 +224,13 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
     polynomials.lagrange_last.at(final_active_wire_idx) = 1;
 
     construct_lookup_polynomials(circuit);
+    if (consume_circuit) {
+        // The lookup table polynomials and read counts/tags have been constructed; the tables are no longer needed.
+        std::remove_reference_t<decltype(circuit.get_lookup_tables())>().swap(circuit.get_lookup_tables());
+    }
 
-    // Public inputs
+    // Public inputs (the pub_inputs block's size/offset remain valid after gate data release: blocks cache their
+    // size when freed)
     metadata.num_public_inputs = circuit.blocks.pub_inputs.size();
     metadata.pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
     for (size_t i = 0; i < metadata.num_public_inputs; ++i) {
@@ -164,7 +300,16 @@ template <typename Flavor> void ProverInstance_<Flavor>::allocate_permutation_ar
         id = Polynomial::shiftable(trace_active_range_size(), dyadic_size(), Polynomial::DontZeroMemory::FLAG);
     }
 
-    polynomials.z_perm = Polynomial::shiftable(trace_active_range_size(), dyadic_size(), Flavor::HasZK);
+    if (consumed_circuit) {
+        // Defer the real z_perm allocation to the grand-product computation in oink (its first
+        // write): the PK-construction climb is the process peak, and oink runs well below it, so
+        // the deferral takes z_perm's 1.4KB/gate out of the high-water mark. A minimal unmasked
+        // shiftable stub keeps set_shifted() and any virtual-zero reads valid in the meantime;
+        // the real allocation in oink applies the ZK masking rows.
+        polynomials.z_perm = Polynomial::shiftable(NUM_ZERO_ROWS + 1, dyadic_size(), /*masked=*/false);
+    } else {
+        polynomials.z_perm = Polynomial::shiftable(trace_active_range_size(), dyadic_size(), Flavor::HasZK);
+    }
 }
 
 template <typename Flavor> void ProverInstance_<Flavor>::allocate_lagrange_polynomials()

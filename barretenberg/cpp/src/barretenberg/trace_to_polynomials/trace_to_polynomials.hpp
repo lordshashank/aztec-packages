@@ -24,21 +24,26 @@ template <class Flavor> class TraceToPolynomials {
     static constexpr size_t NUM_WIRES = Builder::NUM_WIRES;
 
     /**
-     * @brief Given a circuit, populate a proving key with wire polys, selector polys, and sigma/id polys
+     * @brief Populate wire polynomials, selector polynomials (and, for Mega, ecc op wires) and compute the copy
+     * cycles from raw circuit data. The wire and selector polynomials must already be allocated; the permutation
+     * argument polynomials (sigma/id) need not exist yet (they are computed by the caller from the returned copy
+     * cycles), which allows their allocation to be deferred until after the builder's gate data has been released.
      * @note By default, this method constructs an execution trace that is sorted by gate type.
      *
      * @param builder
+     * @param consume_builder If true (Ultra flavors only), progressively release the builder's gate data: each
+     * block's wire-index vectors as soon as its wires are transferred into the polynomials, the selectors once
+     * they are copied, and the witness values and copy-constraint bookkeeping once all blocks are done. This
+     * substantially reduces peak memory but leaves the builder unusable for anything except the permutation tag
+     * data (real_variable_tags/tau) and the lookup tables, which remain valid. Ignored for Mega flavors
+     * (databus/ecc-op data is needed downstream).
+     * @return CopyCycles flat copy cycles describing the copy constraints in the circuit
      */
-    static void populate(Builder& builder, ProverPolynomials&);
+    static CopyCycles populate_wires_and_selectors(Builder& builder,
+                                                                       ProverPolynomials&,
+                                                                       bool consume_builder = false);
 
   private:
-    /**
-     * @brief Populate wire polynomials, selector polynomials and copy cycles from raw circuit data
-     * @return std::vector<CyclicPermutation> copy cycles describing the copy constraints in the circuit
-     */
-    static std::vector<CyclicPermutation> populate_wires_and_selectors_and_compute_copy_cycles(Builder& builder,
-                                                                                               ProverPolynomials&);
-
     /**
      * @brief Construct and add the goblin ecc op wires to the proving key
      * @details The ecc op wires vanish everywhere except on the ecc op block, where they contain a copy of the ecc op

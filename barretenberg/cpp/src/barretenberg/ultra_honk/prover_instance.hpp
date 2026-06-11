@@ -13,6 +13,7 @@
 #include "barretenberg/flavor/ultra_keccak_flavor.hpp"
 #include "barretenberg/flavor/ultra_keccak_zk_flavor.hpp"
 #include "barretenberg/flavor/ultra_zk_flavor.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/polynomials/polynomial_stats.hpp"
 #include "barretenberg/relations/relation_parameters.hpp"
 
@@ -53,6 +54,16 @@ template <typename Flavor_> class ProverInstance_ {
     std::vector<uint32_t> memory_read_records;
     std::vector<uint32_t> memory_write_records;
 
+    // u32 images of the sigma/id polynomials (sigmas then ids), populated under consume_circuit.
+    // The permutation argument is computed on these first so the copy-cycle data can be dropped
+    // before the Fr polynomials are materialized; a one-shot prover may later release the Fr
+    // originals and serve the Gemini batching pass from these (see UltraProver_::consume_polynomials).
+    std::vector<CompressedIndexPolynomial> sigma_id_sidecars;
+
+    // Whether this instance consumed its circuit during construction (one-shot prove path). Gates the
+    // memory-peak optimizations: deferred z_perm allocation (done lazily at the grand product) etc.
+    bool consumed_circuit = false;
+
     size_t dyadic_size() const { return metadata.dyadic_size; }
     size_t log_dyadic_size() const { return numeric::get_msb(dyadic_size()); }
     size_t pub_inputs_offset() const { return metadata.pub_inputs_offset; }
@@ -73,7 +84,15 @@ template <typename Flavor_> class ProverInstance_ {
         return typename Flavor::PrecomputedData{ polynomials.get_precomputed(), metadata };
     }
 
-    ProverInstance_(Circuit& circuit);
+    /**
+     * @param consume_circuit If true (Ultra flavors only), the circuit's memory (gate data, witness values, copy
+     * constraint and lookup bookkeeping) is progressively released as soon as it has been transferred into the
+     * prover polynomials, and the large polynomials are allocated in stages interleaved with that release, so the
+     * builder and the full set of polynomials never coexist. This substantially reduces peak memory. The circuit is
+     * left in a valid-to-destroy but otherwise unusable state. Ignored for Mega flavors (databus/ecc-op data is
+     * needed downstream).
+     */
+    ProverInstance_(Circuit& circuit, bool consume_circuit = false);
 
     ProverInstance_() = default;
     ProverInstance_(const ProverInstance_&) = delete;
