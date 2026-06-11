@@ -53,7 +53,7 @@ template <typename Curve> class MSM {
                   "shifting uint64_t by >= 64 is UB.");
 
     // Number of points to look ahead for memory prefetching
-    static constexpr size_t PREFETCH_LOOKAHEAD = 32;
+    static constexpr size_t PREFETCH_LOOKAHEAD = 256;
 
     // Prefetch every N iterations (must be power of 2); mask is N-1 for efficient modulo
     static constexpr size_t PREFETCH_INTERVAL = 16;
