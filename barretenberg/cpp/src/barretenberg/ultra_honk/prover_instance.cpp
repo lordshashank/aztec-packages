@@ -17,6 +17,10 @@
 #include "barretenberg/stdlib_circuit_builders/ultra_circuit_builder.hpp"
 #include "barretenberg/trace_to_polynomials/trace_to_polynomials.hpp"
 
+#if defined(__GLIBC__) && !defined(__wasm__)
+#include <malloc.h>
+#endif
+
 namespace bb {
 
 template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& circuit, bool consume_circuit)
@@ -150,6 +154,14 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
             circuit.release_permutation_data();
             copy_cycles.clear();
             copy_cycles.shrink_to_fit();
+
+#if defined(__GLIBC__) && !defined(__wasm__)
+            // The consumed builder/cycle memory was freed in small chunks that glibc retains in the
+            // arena, while the sigma/id materialization below allocates large blocks that go to fresh
+            // mmaps — the retained pages and the new blocks would stack up in peak RSS. Return the
+            // free arena pages to the OS before the climb.
+            malloc_trim(0);
+#endif
 
             allocate_permutation_argument_polynomials();
             {
