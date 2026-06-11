@@ -18,6 +18,7 @@
 #include "barretenberg/common/ref_span.hpp"
 #include "barretenberg/common/thread.hpp"
 #include "barretenberg/flavor/flavor.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/polynomials/polynomial.hpp"
 
 #include <cstddef>
@@ -169,6 +170,102 @@ void compute_permutation_argument_polynomials(const typename Flavor::CircuitBuil
         for (size_t i = 0; i < num_public_inputs; ++i) {
             const uint32_t idx = static_cast<uint32_t>(i + pub_inputs_offset);
             sigmas[0].at(idx) = -FF(idx + 1);
+        }
+    }
+}
+
+/**
+ * @brief Sidecar-first variant of \ref compute_permutation_argument_polynomials: writes the u32 images
+ * (sigmas then ids) instead of the Fr polynomials.
+ *
+ * @details Every sigma/id value is +/-(small index) — see CompressedIndexPolynomial — so the three phases
+ * (identity init, cycle linkages, public-input override) can run entirely on u32 arrays (4 bytes/element
+ * instead of 32). This lets the proving-key construction drop the copy-cycle data *before* the Fr
+ * polynomials are materialized (see ProverInstance), so the two never coexist at the PK-phase peak.
+ * The phases mirror the Fr variant above one-to-one; keep them in sync.
+ */
+template <typename Flavor>
+void compute_permutation_argument_sidecars(const typename Flavor::CircuitBuilder& circuit,
+                                           std::vector<CompressedIndexPolynomial>& sidecars,
+                                           const std::vector<CyclicPermutation>& copy_cycles,
+                                           const size_t start_index,
+                                           const size_t end_index)
+{
+    constexpr size_t NUM_WIRES = Flavor::NUM_WIRES;
+    constexpr size_t SEPARATOR = PERMUTATION_ARGUMENT_VALUE_SEPARATOR;
+    constexpr uint32_t SIGN_BIT = CompressedIndexPolynomial::SIGN_BIT;
+
+    BB_ASSERT_LT(end_index, static_cast<size_t>(SEPARATOR));
+
+    sidecars.assign(2 * NUM_WIRES, {});
+    for (auto& sidecar : sidecars) {
+        sidecar.start_index = start_index;
+        sidecar.values.resize(end_index - start_index);
+    }
+    // sigmas occupy slots [0, NUM_WIRES), ids slots [NUM_WIRES, 2*NUM_WIRES).
+    auto sigma_at = [&](size_t wire, size_t idx) -> uint32_t& { return sidecars[wire].values[idx - start_index]; };
+    auto id_at = [&](size_t wire, size_t idx) -> uint32_t& {
+        return sidecars[NUM_WIRES + wire].values[idx - start_index];
+    };
+
+    // Phase 1: identity init.
+    {
+        BB_BENCH_NAME("permutation_polys_identity_init");
+        const size_t domain_size = end_index - start_index;
+        const MultithreadData thread_data = calculate_thread_data(domain_size);
+        for (size_t wire_idx = 0; wire_idx < NUM_WIRES; ++wire_idx) {
+            const size_t base = SEPARATOR * wire_idx;
+            parallel_for(thread_data.num_threads, [&](size_t j) {
+                BB_BENCH_TRACY_NAME("Permutation::identity_init");
+                for (size_t i = thread_data.start[j]; i < thread_data.end[j]; ++i) {
+                    const size_t poly_idx = i + start_index;
+                    const auto v = static_cast<uint32_t>(poly_idx + base);
+                    sigma_at(wire_idx, poly_idx) = v;
+                    id_at(wire_idx, poly_idx) = v;
+                }
+            });
+        }
+    }
+
+    // Phase 2: cycle linkages and tag values.
+    {
+        BB_BENCH_NAME("permutation_polys_cycle_linkages");
+        std::span<const uint32_t> real_variable_tags = circuit.real_variable_tags;
+        const auto& tau = circuit.tau();
+
+        parallel_for_heuristic(
+            copy_cycles.size(),
+            [&](size_t cycle_idx) {
+                const CyclicPermutation& cycle = copy_cycles[cycle_idx];
+                const auto cycle_size = cycle.size();
+                if (cycle_size == 0) {
+                    return;
+                }
+                for (size_t node_idx = 0; node_idx + 1 < cycle_size; ++node_idx) {
+                    const cycle_node& current = cycle[node_idx];
+                    const cycle_node& next = cycle[node_idx + 1];
+                    sigma_at(current.wire_idx, current.gate_idx) =
+                        static_cast<uint32_t>(next.gate_idx + (SEPARATOR * next.wire_idx));
+                }
+                const uint32_t var_tag = real_variable_tags[cycle_idx];
+                const cycle_node& last_node = cycle[cycle_size - 1];
+                sigma_at(last_node.wire_idx, last_node.gate_idx) =
+                    static_cast<uint32_t>((SEPARATOR * NUM_WIRES) + tau.at(var_tag));
+                const cycle_node& first_node = cycle[0];
+                id_at(first_node.wire_idx, first_node.gate_idx) =
+                    static_cast<uint32_t>((SEPARATOR * NUM_WIRES) + var_tag);
+            },
+            /*heuristic_cost=*/thread_heuristics::FF_COPY_COST * 8);
+    }
+
+    // Phase 3: public input override on sigma_0 (negated small indices: sign bit set).
+    {
+        BB_BENCH_NAME("permutation_polys_public_input_overrides");
+        const auto num_public_inputs = static_cast<uint32_t>(circuit.num_public_inputs());
+        const auto pub_inputs_offset = circuit.blocks.pub_inputs.trace_offset();
+        for (size_t i = 0; i < num_public_inputs; ++i) {
+            const uint32_t idx = static_cast<uint32_t>(i + pub_inputs_offset);
+            sigma_at(0, idx) = (idx + 1) | SIGN_BIT;
         }
     }
 }

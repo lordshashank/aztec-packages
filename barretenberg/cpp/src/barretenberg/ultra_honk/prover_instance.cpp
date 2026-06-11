@@ -97,19 +97,52 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
         std::vector<CyclicPermutation> copy_cycles =
             TraceToPolynomials<Flavor>::populate_wires_and_selectors(circuit, polynomials, consume_circuit);
 
-        // Allocate the permutation argument polynomials only now: under consume_circuit this reuses the memory
-        // released by the circuit's gate data instead of growing the peak.
-        allocate_permutation_argument_polynomials();
-
-        // Compute the permutation argument polynomials (sigma/id) and add them to proving key
-        {
-            BB_BENCH_NAME("compute_permutation_argument_polynomials");
-
-            compute_permutation_argument_polynomials<Flavor>(circuit, polynomials, copy_cycles);
-        }
         if (consume_circuit) {
-            // Sigma/id polynomials are computed; the tag/tau data is no longer needed.
+            // Compute the permutation argument on u32 sidecars first (sigma/id values are small signed
+            // indices), so the copy-cycle and tag/tau data can be dropped BEFORE the ~8x larger Fr images
+            // are materialized — the two never coexist, which keeps the PK-construction transient from
+            // setting the process peak.
+            {
+                BB_BENCH_NAME("compute_permutation_argument_polynomials");
+                compute_permutation_argument_sidecars<Flavor>(
+                    circuit, sigma_id_sidecars, copy_cycles, NUM_ZERO_ROWS, trace_active_range_size());
+            }
             circuit.release_permutation_data();
+            copy_cycles.clear();
+            copy_cycles.shrink_to_fit();
+
+            allocate_permutation_argument_polynomials();
+            {
+                BB_BENCH_NAME("materialize_permutation_argument_polynomials");
+                auto sigmas = polynomials.get_sigmas();
+                auto ids = polynomials.get_ids();
+                const size_t domain_size = trace_active_range_size() - NUM_ZERO_ROWS;
+                const MultithreadData thread_data = calculate_thread_data(domain_size);
+                for (size_t wire_idx = 0; wire_idx < sigmas.size(); ++wire_idx) {
+                    auto& sigma = sigmas[wire_idx];
+                    auto& id = ids[wire_idx];
+                    const auto& sigma_sidecar = sigma_id_sidecars[wire_idx];
+                    const auto& id_sidecar = sigma_id_sidecars[sigmas.size() + wire_idx];
+                    parallel_for(thread_data.num_threads, [&](size_t j) {
+                        for (size_t i = thread_data.start[j]; i < thread_data.end[j]; ++i) {
+                            const size_t poly_idx = i + NUM_ZERO_ROWS;
+                            sigma.at(poly_idx) = sigma_sidecar.template decompress<FF>(poly_idx);
+                            id.at(poly_idx) = id_sidecar.template decompress<FF>(poly_idx);
+                        }
+                    });
+                }
+            }
+        } else {
+            // Allocate the permutation argument polynomials only now: under consume_circuit this reuses the
+            // memory released by the circuit's gate data instead of growing the peak.
+            allocate_permutation_argument_polynomials();
+
+            // Compute the permutation argument polynomials (sigma/id) and add them to proving key
+            {
+                BB_BENCH_NAME("compute_permutation_argument_polynomials");
+
+                compute_permutation_argument_polynomials<Flavor>(circuit, polynomials, copy_cycles);
+            }
         }
     }
 

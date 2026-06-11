@@ -732,7 +732,9 @@ template <typename Flavor> class SumcheckProver {
             dest_view[j] = std::move(dest);
             for (auto& [source_ptr, sidecar] : compress_and_release_on_first_fold) {
                 if (source_ptr == &poly) {
-                    *sidecar = CompressedIndexPolynomial::compress(poly);
+                    if (sidecar->values.empty()) { // may already hold the image from PK construction
+                        *sidecar = CompressedIndexPolynomial::compress(poly);
+                    }
                     poly = typename Flavor::Polynomial{};
                 }
             }

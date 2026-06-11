@@ -13,6 +13,7 @@
 #include "barretenberg/flavor/ultra_keccak_flavor.hpp"
 #include "barretenberg/flavor/ultra_keccak_zk_flavor.hpp"
 #include "barretenberg/flavor/ultra_zk_flavor.hpp"
+#include "barretenberg/polynomials/compressed_index_polynomial.hpp"
 #include "barretenberg/polynomials/polynomial_stats.hpp"
 #include "barretenberg/relations/relation_parameters.hpp"
 
@@ -52,6 +53,12 @@ template <typename Flavor_> class ProverInstance_ {
 
     std::vector<uint32_t> memory_read_records;
     std::vector<uint32_t> memory_write_records;
+
+    // u32 images of the sigma/id polynomials (sigmas then ids), populated under consume_circuit.
+    // The permutation argument is computed on these first so the copy-cycle data can be dropped
+    // before the Fr polynomials are materialized; a one-shot prover may later release the Fr
+    // originals and serve the Gemini batching pass from these (see UltraProver_::consume_polynomials).
+    std::vector<CompressedIndexPolynomial> sigma_id_sidecars;
 
     size_t dyadic_size() const { return metadata.dyadic_size; }
     size_t log_dyadic_size() const { return numeric::get_msb(dyadic_size()); }
