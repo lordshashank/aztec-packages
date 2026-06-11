@@ -22,6 +22,7 @@ time ratio to the paired base on the same VM). Δ columns are vs that base, not 
 |---|---|---|---|---|---|---|---|---|---|---|
 | 2026-06-10 | original pinned base (this branch's starting point) | — | — | 63.74 s | — | 1973 MiB | — | — | origin | `7e94c2c0e3` |
 | 2026-06-11 | #7 perf: time campaign — arm64 asm everywhere, signed-Booth MSM, deep prefetch, Shp | @lordshashank | claude-fable-5 | 45.31 s | −18.05 s | 1823 MiB | −158 MiB | 0.8513 | accept | `4b46c28b29` |
+| 2026-06-11 | #8 perf: memory campaign — σ/id u32 sidecars, flat copy cycles, selector trims  | @lordshashank | claude-fable-5 | 45.15 s | −0.29 s | 1441 MiB | −382 MiB | 0.9948 | accept | `3e81b00a1a` |
 <!-- ROWS-ABOVE: record.mjs inserts new rows directly above this line -->
 
 _Official numbers are produced only by the `zk-arena-grade` workflow on GitHub-hosted runners;
