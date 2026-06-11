@@ -21,6 +21,7 @@ time ratio to the paired base on the same VM). Δ columns are vs that base, not 
 | date | change | author | model | arm64 time | Δ time | arm64 RSS | Δ RSS | x86 ratio | verdict | merge |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 2026-06-10 | original pinned base (this branch's starting point) | — | — | 63.74 s | — | 1973 MiB | — | — | origin | `7e94c2c0e3` |
+| 2026-06-11 | #7 perf: time campaign — arm64 asm everywhere, signed-Booth MSM, deep prefetch, Shp | @lordshashank | claude-fable-5 | 45.31 s | −18.05 s | 1823 MiB | −158 MiB | 0.8513 | accept | `4b46c28b29` |
 <!-- ROWS-ABOVE: record.mjs inserts new rows directly above this line -->
 
 _Official numbers are produced only by the `zk-arena-grade` workflow on GitHub-hosted runners;
