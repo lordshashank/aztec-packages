@@ -37,9 +37,9 @@ template <class Flavor> class TraceToPolynomials {
      * substantially reduces peak memory but leaves the builder unusable for anything except the permutation tag
      * data (real_variable_tags/tau) and the lookup tables, which remain valid. Ignored for Mega flavors
      * (databus/ecc-op data is needed downstream).
-     * @return std::vector<CyclicPermutation> copy cycles describing the copy constraints in the circuit
+     * @return CopyCycles flat copy cycles describing the copy constraints in the circuit
      */
-    static std::vector<CyclicPermutation> populate_wires_and_selectors(Builder& builder,
+    static CopyCycles populate_wires_and_selectors(Builder& builder,
                                                                        ProverPolynomials&,
                                                                        bool consume_builder = false);
 

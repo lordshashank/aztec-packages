@@ -99,7 +99,7 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
     // progressively releases the circuit's gate data and witness values.
     vinfo("populating trace...");
     {
-        std::vector<CyclicPermutation> copy_cycles =
+        CopyCycles copy_cycles =
             TraceToPolynomials<Flavor>::populate_wires_and_selectors(circuit, polynomials, consume_circuit);
 
         if (consume_circuit) {
@@ -152,8 +152,7 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
                     circuit, sigma_id_sidecars, copy_cycles, NUM_ZERO_ROWS, trace_active_range_size());
             }
             circuit.release_permutation_data();
-            copy_cycles.clear();
-            copy_cycles.shrink_to_fit();
+            copy_cycles = {};
 
 #if defined(__GLIBC__) && !defined(__wasm__)
             // The consumed builder/cycle memory was freed in small chunks that glibc retains in the
