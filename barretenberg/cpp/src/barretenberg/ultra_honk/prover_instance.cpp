@@ -27,6 +27,7 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
     if constexpr (IsMegaFlavor<Flavor>) {
         consume_circuit = false; // Mega requires builder data (databus, ecc op) throughout construction
     }
+    consumed_circuit = consume_circuit;
 
     // Check pairing point tagging: either no pairing points were created,
     // or all pairing points have been aggregated into a single equivalence class
@@ -288,7 +289,16 @@ template <typename Flavor> void ProverInstance_<Flavor>::allocate_permutation_ar
         id = Polynomial::shiftable(trace_active_range_size(), dyadic_size(), Polynomial::DontZeroMemory::FLAG);
     }
 
-    polynomials.z_perm = Polynomial::shiftable(trace_active_range_size(), dyadic_size(), Flavor::HasZK);
+    if (consumed_circuit) {
+        // Defer the real z_perm allocation to the grand-product computation in oink (its first
+        // write): the PK-construction climb is the process peak, and oink runs well below it, so
+        // the deferral takes z_perm's 1.4KB/gate out of the high-water mark. A minimal unmasked
+        // shiftable stub keeps set_shifted() and any virtual-zero reads valid in the meantime;
+        // the real allocation in oink applies the ZK masking rows.
+        polynomials.z_perm = Polynomial::shiftable(NUM_ZERO_ROWS + 1, dyadic_size(), /*masked=*/false);
+    } else {
+        polynomials.z_perm = Polynomial::shiftable(trace_active_range_size(), dyadic_size(), Flavor::HasZK);
+    }
 }
 
 template <typename Flavor> void ProverInstance_<Flavor>::allocate_lagrange_polynomials()

@@ -275,6 +275,15 @@ template <typename Flavor> void OinkProver<Flavor>::compute_grand_product_polyno
     relation_parameters.public_input_delta = compute_public_input_delta<Flavor>(
         instance.public_inputs, relation_parameters.beta, relation_parameters.gamma, instance.pub_inputs_offset());
 
+    // Deferred from PK construction (see allocate_permutation_argument_polynomials): the grand product
+    // is z_perm's first write, and oink runs well below the PK-construction memory high-water mark.
+    const size_t active_range_size = instance.get_final_active_wire_idx() + 1;
+    if (instance.polynomials.z_perm.end_index() < active_range_size) {
+        instance.polynomials.z_perm =
+            Flavor::Polynomial::shiftable(active_range_size, instance.dyadic_size(), Flavor::HasZK);
+        instance.polynomials.set_shifted();
+    }
+
     // Compute permutation grand product polynomial
     compute_grand_product<Flavor, UltraPermutationRelation<FF>>(
         instance.polynomials, relation_parameters, instance.get_final_active_wire_idx() + 1);
