@@ -129,6 +129,10 @@ template <typename Curve> class GeminiProver_ {
 
         size_t full_batched_size = 0; // size of the full batched polynomial (generally the circuit size)
         size_t actual_data_size_ = 0; // max end_index across all polynomials (actual data extent)
+        // If set, the source polynomials are released (backing memory freed) at the end of compute_batched —
+        // the batching pass is their last read in a one-shot prove. Opt-in: callers that reuse the
+        // polynomials after proving (folding, tests) must leave this off.
+        bool consume_sources_ = false;
 
         Polynomial batched_unshifted;            // linear combination of unshifted polynomials
         Polynomial batched_to_be_shifted_by_one; // linear combination of to-be-shifted polynomials
@@ -160,6 +164,7 @@ template <typename Curve> class GeminiProver_ {
         // Set references to the polynomials to be batched
         void set_unshifted(RefVector<Polynomial> polynomials) { unshifted = polynomials; }
         void set_to_be_shifted_by_one(RefVector<Polynomial> polynomials) { to_be_shifted_by_one = polynomials; }
+        void set_consume_sources(bool consume) { consume_sources_ = consume; }
 
         void add_unshifted_tail(size_t batcher_index, Polynomial&& tail)
         {
@@ -234,6 +239,20 @@ template <typename Curve> class GeminiProver_ {
             batch_tails(batched_shifted_tail_, shifted_tails_, shifted_base);
             if (!batched_shifted_tail_.is_empty()) {
                 full_batched += batched_shifted_tail_.shifted();
+            }
+
+            // The batching pass above is the last read of the source polynomials; everything downstream
+            // (folds, A₀₊/A₀₋, Shplonk, KZG) works off the batched accumulators. Release the sources now so
+            // their memory does not sit under the PCS-phase peak. The to-be-shifted set aliases entries of
+            // the unshifted set (wires/z_perm are opened both ways), so freeing happens only after both
+            // batching passes; double-release of the same entity is a harmless no-op.
+            if (consume_sources_) {
+                for (auto& poly : unshifted) {
+                    poly = Polynomial{};
+                }
+                for (auto& poly : to_be_shifted_by_one) {
+                    poly = Polynomial{};
+                }
             }
 
             return full_batched;
