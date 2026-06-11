@@ -98,6 +98,45 @@ template <typename Flavor> ProverInstance_<Flavor>::ProverInstance_(Circuit& cir
             TraceToPolynomials<Flavor>::populate_wires_and_selectors(circuit, polynomials, consume_circuit);
 
         if (consume_circuit) {
+            // The wide selectors (allocated over the whole active range because they span several gate
+            // blocks) are typically zero outside the blocks that use them — e.g. a Poseidon2-heavy trace
+            // leaves q_m entirely zero and q_c/q_r/q_o/q_4 mostly zero. Trim each to its
+            // [first_nonzero, last_nonzero] support: reads outside the window hit the polynomial's
+            // virtual zeros, so every consumer sees identical values while the dead backing is freed.
+            {
+                BB_BENCH_NAME("trim_wide_selector_supports");
+                auto trim_to_support = [&](Polynomial& poly) {
+                    const size_t start = poly.start_index();
+                    const size_t end = poly.end_index();
+                    size_t first_nonzero = end;
+                    size_t last_nonzero = start;
+                    for (size_t i = start; i < end; ++i) {
+                        if (!poly[i].is_zero()) {
+                            first_nonzero = std::min(first_nonzero, i);
+                            last_nonzero = i;
+                        }
+                    }
+                    if (first_nonzero == end) { // all zero: keep a minimal stub with full virtual size
+                        poly = Polynomial(1, dyadic_size(), 0);
+                        return;
+                    }
+                    const size_t support = last_nonzero + 1 - first_nonzero;
+                    if (support + 4096 >= end - start) { // not worth a copy for a few pages
+                        return;
+                    }
+                    Polynomial trimmed(support, dyadic_size(), first_nonzero);
+                    for (size_t i = first_nonzero; i <= last_nonzero; ++i) {
+                        trimmed.at(i) = poly[i];
+                    }
+                    poly = std::move(trimmed);
+                };
+                trim_to_support(polynomials.q_m);
+                trim_to_support(polynomials.q_c);
+                trim_to_support(polynomials.q_l);
+                trim_to_support(polynomials.q_r);
+                trim_to_support(polynomials.q_o);
+                trim_to_support(polynomials.q_4);
+            }
             // Compute the permutation argument on u32 sidecars first (sigma/id values are small signed
             // indices), so the copy-cycle and tag/tau data can be dropped BEFORE the ~8x larger Fr images
             // are materialized — the two never coexist, which keeps the PK-construction transient from
