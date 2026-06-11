@@ -1,0 +1,6 @@
+[package]
+name = "synth"
+type = "bin"
+compiler_version = ">=0.30.0"
+
+[dependencies]

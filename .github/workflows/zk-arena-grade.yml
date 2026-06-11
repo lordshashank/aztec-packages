@@ -1,0 +1,175 @@
+# zk-arena — OFFICIAL grading of a submission PR (maintainer-dispatched).
+#
+# Rolling-champion model: the PR's merge result is graded against the current
+# zk-arena branch tip, PAIRED on the same VM, on two architectures in parallel:
+#   arm64: ubuntu-24.04-arm (Azure Cobalt 100 — homogeneous, absolute seconds)
+#   x86  : ubuntu-latest    (mixed EPYC/Xeon — scored as a ratio to the paired base)
+# A decide job produces an ADVISORY Pareto verdict (improve >= 1 metric beyond its
+# noise margin, regress none beyond margin, all gates pass) and posts it to the PR
+# as a comment + commit status. Merging is the maintainer's call; on merge the
+# candidate becomes the new base. Soundness is anchored forever to the FROZEN
+# verifier + VK from the original pinned base (built in zk-arena/setup.sh).
+#
+# Trust model: only maintainers can dispatch; every script comes from the zk-arena
+# branch tip. The PR contributes its diff only, gated by the touched-files policy
+# (re-checked here from trusted context — the pull_request policy run is advisory).
+name: zk-arena-grade
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to grade (against the current zk-arena tip)
+        type: string
+        required: true
+      runs:
+        description: graded runs (median/sigma)
+        type: string
+        default: "5"
+
+concurrency:
+  group: zk-arena-grade
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  grade-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zk-arena
+      - name: Fetch PR refs
+        run: |
+          git fetch origin "pull/${{ inputs.pr }}/head:pr-head" "pull/${{ inputs.pr }}/merge:pr-merge"
+      - uses: actions/cache@v4
+        with:
+          path: ~/bb-baseline
+          key: bb-frozen-verifier-${{ runner.arch }}-clang20-v1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.arch }}-clang20-zkarena-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ runner.arch }}-clang20-zkarena-
+            ccache-${{ runner.arch }}-clang20-
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bb-crs
+          key: bb-crs-2pow21-v1
+      - name: Provision environment
+        run: bash zk-arena/setup.sh
+      - name: Grade base + candidate (paired)
+        run: bash zk-arena/pr-grade.sh "${{ inputs.pr }}" "${{ inputs.runs }}"
+      - name: Upload grading artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-grade
+          path: ci-out/
+          if-no-files-found: ignore
+
+  grade-x86:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zk-arena
+      - name: Fetch PR refs
+        run: |
+          git fetch origin "pull/${{ inputs.pr }}/head:pr-head" "pull/${{ inputs.pr }}/merge:pr-merge"
+      - uses: actions/cache@v4
+        with:
+          path: ~/bb-baseline
+          key: bb-frozen-verifier-${{ runner.arch }}-clang20-v1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-${{ runner.arch }}-clang20-zkarena-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ runner.arch }}-clang20-zkarena-
+            ccache-${{ runner.arch }}-clang20-
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bb-crs
+          key: bb-crs-2pow21-v1
+      - name: Provision environment
+        run: bash zk-arena/setup.sh
+      - name: Grade base + candidate (paired)
+        run: bash zk-arena/pr-grade.sh "${{ inputs.pr }}" "${{ inputs.runs }}"
+      - name: Upload grading artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x86-grade
+          path: ci-out/
+          if-no-files-found: ignore
+
+  decide:
+    if: always()
+    needs: [grade-arm64, grade-x86]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zk-arena
+          sparse-checkout: zk-arena
+      - name: Download arm64 grading
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: arm64-grade
+          path: ci-in/arm64-grade
+      - name: Download x86 grading
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: x86-grade
+          path: ci-in/x86-grade
+      - name: Decide (advisory Pareto verdict)
+        run: |
+          mkdir -p ci-out
+          node zk-arena/decide.mjs --arm64-dir=ci-in/arm64-grade --x86-dir=ci-in/x86-grade > ci-out/verdict.json
+          cat ci-out/verdict.json
+      - name: Comment verdict on PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY=$(printf 'zk-arena official grading (paired vs branch tip, arm64 + x86):\n\n```json\n%s\n```\n\n_advisory: merging is the maintainer'"'"'s call; on merge this becomes the new base._\nRun: %s\n' \
+            "$(cat ci-out/verdict.json 2>/dev/null || echo '{"status":"error","reason":"no verdict produced — see run log"}')" \
+            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}")
+          gh pr comment "${{ inputs.pr }}" --repo "${{ github.repository }}" --body "$BODY"
+      - name: Commit status on PR head
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          STATUS=$(jq -r '.status // "error"' ci-out/verdict.json 2>/dev/null || echo error)
+          HEAD_SHA=$(jq -r '.headSha // empty' ci-out/verdict.json 2>/dev/null)
+          [ -n "$HEAD_SHA" ] || HEAD_SHA=$(gh pr view "${{ inputs.pr }}" --repo "${{ github.repository }}" --json headRefOid --jq .headRefOid)
+          case "$STATUS" in
+            accept) STATE=success; DESC="accept: improves beyond noise margin (Pareto)";;
+            tradeoff) STATE=success; DESC="tradeoff: improves one metric, regresses another — maintainer call";;
+            reject) STATE=failure; DESC="reject: no metric improved beyond its noise margin";;
+            invalid) STATE=failure; DESC="invalid: gates or hard budgets failed";;
+            *) STATE=error; DESC="grading error — see run";;
+          esac
+          gh api "repos/${{ github.repository }}/statuses/$HEAD_SHA" \
+            -f state="$STATE" -f context="zk-arena/official-grade" \
+            -f description="$DESC" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Upload decision artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: decision-${{ github.run_id }}
+          path: ci-out/
+          if-no-files-found: ignore

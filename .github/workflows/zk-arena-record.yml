@@ -1,0 +1,63 @@
+# zk-arena — record merged submissions on the leaderboard.
+#
+# Fires on every push to zk-arena. If the pushed head is the merge of a PR that
+# carries an official grading verdict (posted by zk-arena-grade), append the
+# leaderboard row + log.jsonl entry and push that as a bot commit. Idempotent;
+# skips its own commits and pushes without an associated graded PR.
+name: zk-arena-record
+
+on:
+  push:
+    branches: [zk-arena]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  record:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: zk-arena
+          fetch-depth: 0
+      - name: Find merged PR + its verdict
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].number' 2>/dev/null || true)
+          if [ -z "$PR" ] || [ "$PR" = "null" ]; then echo "no associated PR — nothing to record"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+          TITLE=$(gh pr view "$PR" --repo "${{ github.repository }}" --json title --jq .title)
+          AUTHOR=$(gh pr view "$PR" --repo "${{ github.repository }}" --json author --jq .author.login)
+          # latest grading comment (posted by zk-arena-grade) — extract its JSON block
+          gh pr view "$PR" --repo "${{ github.repository }}" --json comments \
+            --jq '[.comments[] | select(.body | startswith("zk-arena official grading"))] | last | .body' > /tmp/comment.md || true
+          if ! sed -n '/^```json$/,/^```$/p' /tmp/comment.md | sed '1d;$d' > /tmp/verdict.json || [ ! -s /tmp/verdict.json ]; then
+            echo "merged without an official grading verdict — nothing to record"; echo "skip=1" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "skip=0" >> "$GITHUB_OUTPUT"
+          echo "pr=$PR" >> "$GITHUB_OUTPUT"
+          { echo "title<<EOF"; echo "$TITLE"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          echo "author=$AUTHOR" >> "$GITHUB_OUTPUT"
+      - name: Record on leaderboard
+        if: steps.find.outputs.skip == '0'
+        run: |
+          node zk-arena/record.mjs --verdict=/tmp/verdict.json --pr="${{ steps.find.outputs.pr }}" \
+            --title="${{ steps.find.outputs.title }}" --author="${{ steps.find.outputs.author }}" --merge="${{ github.sha }}"
+      - name: Push bot commit
+        if: steps.find.outputs.skip == '0'
+        run: |
+          git config user.name "zk-arena-bot"
+          git config user.email "zk-arena-bot@users.noreply.github.com"
+          git add zk-arena/LEADERBOARD.md zk-arena/log.jsonl
+          git diff --cached --quiet && { echo "nothing to commit"; exit 0; }
+          git commit -m "zk-arena: record PR #${{ steps.find.outputs.pr }} on the leaderboard"
+          for i in 1 2 3; do
+            git pull --rebase origin zk-arena && git push origin HEAD:zk-arena && exit 0
+            sleep 5
+          done
+          exit 1
