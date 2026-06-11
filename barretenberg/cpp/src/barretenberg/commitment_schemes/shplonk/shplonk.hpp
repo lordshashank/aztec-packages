@@ -64,29 +64,37 @@ template <typename Curve> class ShplonkProver_ {
         }
         // Q(X) = ∑ⱼ νʲ ⋅ ( fⱼ(X) − vⱼ) / ( X − xⱼ )
         Polynomial Q(max_poly_size);
-        Polynomial tmp(max_poly_size);
+
+        // Accumulate scale ⋅ (f(X) − v)/(X − x) into Q in a single fused top-down pass, without materializing
+        // a per-claim quotient polynomial. The quotient coefficients satisfy q_i = f_{i+1} + x·q_{i+1} and do
+        // not depend on f_0 (the evaluation shift at index 0 only affects the remainder), so each claim
+        // polynomial is read exactly once and never copied. Field arithmetic is exact, hence the accumulated
+        // values are identical to the former copy + factor_roots + add_scaled sequence.
+        auto accumulate_quotient = [&Q](const Polynomial& f, const Fr& x, const Fr& scale) {
+            const size_t end = f.end_index();
+            if (end < 2) {
+                return; // constant polynomial: zero quotient
+            }
+            Fr acc = f[end - 1];
+            for (size_t i = end - 1; i-- > 0;) {
+                Q.at(i) += scale * acc;
+                acc = f[i] + x * acc;
+            }
+        };
+        static_cast<void>(gemini_fold_pos_evaluations); // evaluations only shift the (discarded) remainder
 
         Fr current_nu = Fr::one();
 
-        size_t fold_idx = 0;
         for (const auto& claim : opening_claims) {
 
             // Gemini Fold Polynomials have to be opened at -r^{2^j} and r^{2^j}.
             if (claim.gemini_fold) {
-                tmp = claim.polynomial;
-                tmp.at(0) = tmp[0] - gemini_fold_pos_evaluations[fold_idx++];
-                tmp.factor_roots(-claim.opening_pair.challenge);
-                // Add the claim quotient to the batched quotient polynomial
-                Q.add_scaled(tmp, current_nu);
+                accumulate_quotient(claim.polynomial, -claim.opening_pair.challenge, current_nu);
                 current_nu *= nu;
             }
 
-            // Compute individual claim quotient tmp = ( fⱼ(X) − vⱼ) / ( X − xⱼ )
-            tmp = claim.polynomial;
-            tmp.at(0) = tmp[0] - claim.opening_pair.evaluation;
-            tmp.factor_roots(claim.opening_pair.challenge);
-            // Add the claim quotient to the batched quotient polynomial
-            Q.add_scaled(tmp, current_nu);
+            // Accumulate the claim quotient ( fⱼ(X) − vⱼ) / ( X − xⱼ ) into the batched quotient
+            accumulate_quotient(claim.polynomial, claim.opening_pair.challenge, current_nu);
             current_nu *= nu;
         }
         // We use the same batching challenge for Gemini and Libra opening claims. The number of the claims
@@ -97,25 +105,14 @@ template <typename Curve> class ShplonkProver_ {
         }
 
         for (const auto& claim : libra_opening_claims) {
-            // Compute individual claim quotient tmp = ( fⱼ(X) − vⱼ) / ( X − xⱼ )
-            tmp = claim.polynomial;
-            tmp.at(0) = tmp[0] - claim.opening_pair.evaluation;
-            tmp.factor_roots(claim.opening_pair.challenge);
-
-            // Add the claim quotient to the batched quotient polynomial
-            Q.add_scaled(tmp, current_nu);
+            // Accumulate the claim quotient ( fⱼ(X) − vⱼ) / ( X − xⱼ ) into the batched quotient
+            accumulate_quotient(claim.polynomial, claim.opening_pair.challenge, current_nu);
             current_nu *= nu;
         }
 
         for (const auto& claim : sumcheck_round_claims) {
-
-            // Compute individual claim quotient tmp = ( fⱼ(X) − vⱼ) / ( X − xⱼ )
-            tmp = claim.polynomial;
-            tmp.at(0) = tmp[0] - claim.opening_pair.evaluation;
-            tmp.factor_roots(claim.opening_pair.challenge);
-
-            // Add the claim quotient to the batched quotient polynomial
-            Q.add_scaled(tmp, current_nu);
+            // Accumulate the claim quotient ( fⱼ(X) − vⱼ) / ( X − xⱼ ) into the batched quotient
+            accumulate_quotient(claim.polynomial, claim.opening_pair.challenge, current_nu);
             current_nu *= nu;
         }
         // Return batched quotient polynomial Q(X)

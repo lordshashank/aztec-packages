@@ -10,7 +10,8 @@
 //     byte-identical to merge-train (only wrapped in the `legacy` sub-namespace).
 //   * the round-parallel rewrite in scalar_multiplication_fast.hpp (`*_fast`, `MSM_fast`).
 // The public facade (`pippenger`, `pippenger_unsafe`, `MSM`) at the bottom dispatches to
-// the rewrite by default, or to `legacy::` when `use_legacy_msm()` (env BB_MSM_LEGACY).
+// the rewrite by default, or to `legacy::` when `use_legacy_msm()` (single-threaded
+// execution, or env BB_MSM_LEGACY; env BB_MSM_FAST forces the rewrite).
 // Remove the legacy half + the facade dispatch once the rewrite has soaked.
 #include "./scalar_multiplication_fast.hpp"
 #include "barretenberg/ecc/groups/precomputed_generators_bn254_impl.hpp"
@@ -52,7 +53,7 @@ template <typename Curve> class MSM {
                   "shifting uint64_t by >= 64 is UB.");
 
     // Number of points to look ahead for memory prefetching
-    static constexpr size_t PREFETCH_LOOKAHEAD = 32;
+    static constexpr size_t PREFETCH_LOOKAHEAD = 256;
 
     // Prefetch every N iterations (must be power of 2); mask is N-1 for efficient modulo
     static constexpr size_t PREFETCH_INTERVAL = 16;
@@ -194,9 +195,17 @@ template <typename Curve> class MSM {
 
     /**
      * @brief Packed point schedule entry: (point_index << 32) | bucket_index
-     * @details Used to sort points by their target bucket for cache-efficient processing
+     * @details Used to sort points by their target bucket for cache-efficient processing.
+     *          The affine path stores a signed-Booth digit in the low word: bit 31 is the digit's
+     *          sign (1 = subtract the point), bits 0..30 the magnitude (= bucket index). The radix
+     *          sort orders by at most the low 24 bits (MAX_SLICE_BITS rounded up to a byte), so the
+     *          sign rides along untouched; zero digits are stored with the sign cleared so the
+     *          sort's zero-bucket count and skip logic see them as plain zero entries.
      */
     struct PointScheduleEntry {
+        static constexpr uint32_t DIGIT_SIGN_SHIFT = 31;
+        static constexpr uint32_t DIGIT_MAGNITUDE_MASK = (uint32_t{ 1 } << DIGIT_SIGN_SHIFT) - 1;
+
         uint64_t data;
 
         [[nodiscard]] static constexpr PointScheduleEntry create(uint32_t point_index, uint32_t bucket_index) noexcept
@@ -205,6 +214,14 @@ template <typename Curve> class MSM {
         }
         [[nodiscard]] constexpr uint32_t point_index() const noexcept { return static_cast<uint32_t>(data >> 32); }
         [[nodiscard]] constexpr uint32_t bucket_index() const noexcept { return static_cast<uint32_t>(data); }
+        [[nodiscard]] constexpr uint32_t digit_magnitude() const noexcept
+        {
+            return static_cast<uint32_t>(data) & DIGIT_MAGNITUDE_MASK;
+        }
+        [[nodiscard]] constexpr uint64_t digit_sign() const noexcept
+        {
+            return (data >> DIGIT_SIGN_SHIFT) & uint64_t{ 1 };
+        }
     };
 
     // ======================= Public Methods =======================
@@ -247,6 +264,11 @@ template <typename Curve> class MSM {
 
     /** @brief Compute optimal bits per slice by minimizing cost over c in [1, MAX_SLICE_BITS) */
     static uint32_t get_optimal_log_num_buckets(size_t num_points) noexcept;
+
+    /** @brief Window size for the signed-Booth affine path: ceil((NUM_BITS+1)/c) rounds over
+     *         2^(c-1)+1 buckets. Halving the bucket count shifts the optimum to wider windows
+     *         (fewer rounds) than the unsigned model. BB_MSM_SLICE_BITS overrides for tuning. */
+    static uint32_t get_optimal_slice_bits_signed(size_t num_points) noexcept;
 
     /** @brief Partition per-MSM scalar weights into num_threads work units of approximately
      *         equal cumulative weight.
@@ -327,14 +349,20 @@ template <typename Curve> class MSM {
     /** @brief Pippenger using Jacobian buckets (handles edge cases: doubling, infinity) */
     static Element jacobian_pippenger_with_transformed_scalars(MSMData& msm_data) noexcept;
 
-    /** @brief Pippenger using affine buckets with batch inversion (faster, no edge case handling) */
+    /** @brief Pippenger using affine buckets with batch inversion (faster, no edge case handling).
+     *         Uses signed-Booth digits; BB_MSM_UNSIGNED=1 falls back to the unsigned variant. */
     static Element affine_pippenger_with_transformed_scalars(MSMData& msm_data) noexcept;
+
+    /** @brief Unsigned-window variant of the affine-trick Pippenger (pre-Booth behavior). */
+    static Element affine_pippenger_unsigned_with_transformed_scalars(MSMData& msm_data) noexcept;
 
     // Helpers for batch_accumulate_points_into_buckets. Inlined for performance.
 
     // Process single point: if bucket has accumulator, pair them for addition; else cache in bucket.
+    // `sign` (signed-Booth digit sign) negates the incoming point in place after the copy.
     __attribute__((always_inline)) static void process_single_point(size_t bucket,
                                                                     const AffineElement* point_source,
+                                                                    uint64_t sign,
                                                                     AffineAdditionData& affine_data,
                                                                     BucketAccumulators& bucket_data,
                                                                     size_t& scratch_it,
@@ -343,12 +371,14 @@ template <typename Curve> class MSM {
         bool has_accumulator = bucket_data.bucket_exists.get(bucket);
         if (has_accumulator) {
             affine_data.points_to_add[scratch_it] = *point_source;
+            affine_data.points_to_add[scratch_it].y.self_conditional_negate(sign);
             affine_data.points_to_add[scratch_it + 1] = bucket_data.buckets[bucket];
             bucket_data.bucket_exists.set(bucket, false);
             affine_data.addition_result_bucket_destinations[scratch_it >> 1] = static_cast<uint32_t>(bucket);
             scratch_it += 2;
         } else {
             bucket_data.buckets[bucket] = *point_source;
+            bucket_data.buckets[bucket].y.self_conditional_negate(sign);
             bucket_data.bucket_exists.set(bucket, true);
         }
         point_it += 1;
@@ -356,10 +386,16 @@ template <typename Curve> class MSM {
 
     // Branchless bucket pair processing. Updates point_it (by 2 if same bucket, else 1) and scratch_it.
     // See README.md "batch_accumulate_points_into_buckets Algorithm" for case analysis.
+    // Signed-Booth digit signs are applied in place on the destination after the unconditional copies:
+    // the lhs entry is always consumed this call, so its sign always applies; the rhs INPUT point is
+    // only consumed when buckets_match (otherwise rhs_source is the bucket accumulator, which is
+    // already sign-correct, and the rhs entry is reprocessed as the next call's lhs).
     __attribute__((always_inline)) static void process_bucket_pair(size_t lhs_bucket,
                                                                    size_t rhs_bucket,
                                                                    const AffineElement* lhs_source,
                                                                    const AffineElement* rhs_source_if_match,
+                                                                   uint64_t lhs_sign,
+                                                                   uint64_t rhs_sign,
                                                                    AffineAdditionData& affine_data,
                                                                    BucketAccumulators& bucket_data,
                                                                    size_t& scratch_it,
@@ -381,6 +417,8 @@ template <typename Curve> class MSM {
 
         *lhs_destination = *lhs_source;
         *rhs_destination = *rhs_source;
+        lhs_destination->y.self_conditional_negate(lhs_sign);
+        rhs_destination->y.self_conditional_negate(rhs_sign & static_cast<uint64_t>(buckets_match));
 
         bucket_data.bucket_exists.set(lhs_bucket, (has_bucket_accumulator && buckets_match) || !do_affine_add);
         scratch_it += do_affine_add ? 2 : 0;
@@ -406,7 +444,8 @@ extern template class MSM<curve::BN254>;
 
 // ===================================================================================
 // Public MSM facade — the surface every caller uses. Dispatches to the `_fast` rewrite
-// by default, or `legacy::` when use_legacy_msm() (env BB_MSM_LEGACY, read once).
+// by default, or `legacy::` when use_legacy_msm() (single-threaded execution, or env
+// BB_MSM_LEGACY; env BB_MSM_FAST forces the rewrite; the policy is resolved once).
 // Signatures match the rewrite; the legacy branch adapts (legacy has no dedup pre-pass,
 // and its batch entry takes per-MSM point spans).
 // ===================================================================================
