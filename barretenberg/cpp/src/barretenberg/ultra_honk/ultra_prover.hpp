@@ -54,10 +54,6 @@ template <typename Flavor_> class UltraProver_ {
     ZKData zk_sumcheck_data;
     CommitmentKey commitment_key;
 
-    // u32 sidecars (sigmas then ids) extracted when consume_polynomials releases the Fr originals
-    // after sumcheck's first-round fold; they serve the Gemini batching pass at 4 bytes/element.
-    std::vector<CompressedIndexPolynomial> sigma_id_sidecars;
-
     size_t virtual_log_n; // Set during gate challenge generation, reused by sumcheck and PCS
 
     BB_PROFILE void execute_sumcheck_iop();
