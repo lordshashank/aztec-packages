@@ -27,16 +27,18 @@
 #define BBERG_NO_ASM 1
 #endif
 
-// On Apple-silicon arm64 we provide hand-scheduled inline-assembly Montgomery multiplication and
-// squaring routines (see field_impl_arm64.hpp). They apply only to 4x64-bit-limb fields whose
+// On arm64 we provide hand-scheduled inline-assembly Montgomery multiplication and squaring
+// routines (see field_impl_arm64.hpp). They apply only to 4x64-bit-limb fields whose
 // modulus top limb is < 2^62 (the "no-carry" CIOS condition); everything else falls through to
-// the generic implementation.
+// the generic implementation. The scheduling (two-pass carry chains through the single NZCV
+// register) targets the A64 ISA, not a particular micro-architecture: it helps any wide arm64
+// core (verified on Apple M-series and Neoverse) because the win comes from breaking clang's
+// serialized __int128 carry chains, not from machine-specific tuning.
 // NOTE: the build system passes -DDISABLE_ASM=1 on every arm64 build (it predates arm64 assembly
 // and means "the x86-64 assembly is unavailable"), so that flag deliberately does NOT gate this
 // path. Define DISABLE_ARM64_ASM to force the generic implementation instead. The routines are
 // pure register asm (no memory operands), so they are safe under ASAN builds.
-#if defined(__aarch64__) && defined(__APPLE__) && !defined(__wasm__) && !defined(DISABLE_ARM64_ASM) &&                 \
-    defined(__SIZEOF_INT128__)
+#if defined(__aarch64__) && !defined(__wasm__) && !defined(DISABLE_ARM64_ASM) && defined(__SIZEOF_INT128__)
 #define BBERG_ARM64_ASM 1
 #else
 #define BBERG_ARM64_ASM 0
