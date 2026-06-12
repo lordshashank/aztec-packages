@@ -230,7 +230,7 @@ template <typename Curve> class GeminiProver_ {
                 }
             };
 
-            Polynomial full_batched(full_batched_size);
+            Polynomial full_batched(actual_data_size_, full_batched_size);
 
             Fr unshifted_base(1);
             if (has_unshifted()) {

@@ -405,24 +405,30 @@ template <typename Curve> class MSM {
         bool buckets_match = lhs_bucket == rhs_bucket;
         bool do_affine_add = buckets_match || has_bucket_accumulator;
 
+        if (!do_affine_add) {
+            bucket_data.buckets[lhs_bucket] = *lhs_source;
+            bucket_data.buckets[lhs_bucket].y.self_conditional_negate(lhs_sign);
+            bucket_data.bucket_exists.set(lhs_bucket, true);
+            point_it += 1;
+            return;
+        }
+
         const AffineElement* rhs_source = buckets_match ? rhs_source_if_match : &bucket_data.buckets[lhs_bucket];
 
-        AffineElement* lhs_destination =
-            do_affine_add ? &affine_data.points_to_add[scratch_it] : &bucket_data.buckets[lhs_bucket];
-        AffineElement* rhs_destination =
-            do_affine_add ? &affine_data.points_to_add[scratch_it + 1] : &affine_data.null_location;
+        AffineElement* lhs_destination = &affine_data.points_to_add[scratch_it];
+        AffineElement* rhs_destination = &affine_data.points_to_add[scratch_it + 1];
 
         uint32_t& dest_bucket = affine_data.addition_result_bucket_destinations[scratch_it >> 1];
-        dest_bucket = do_affine_add ? static_cast<uint32_t>(lhs_bucket) : dest_bucket;
+        dest_bucket = static_cast<uint32_t>(lhs_bucket);
 
         *lhs_destination = *lhs_source;
         *rhs_destination = *rhs_source;
         lhs_destination->y.self_conditional_negate(lhs_sign);
         rhs_destination->y.self_conditional_negate(rhs_sign & static_cast<uint64_t>(buckets_match));
 
-        bucket_data.bucket_exists.set(lhs_bucket, (has_bucket_accumulator && buckets_match) || !do_affine_add);
-        scratch_it += do_affine_add ? 2 : 0;
-        point_it += (do_affine_add && buckets_match) ? 2 : 1;
+        bucket_data.bucket_exists.set(lhs_bucket, has_bucket_accumulator && buckets_match);
+        scratch_it += 2;
+        point_it += buckets_match ? 2 : 1;
     }
 };
 
