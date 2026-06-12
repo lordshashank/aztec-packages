@@ -332,9 +332,38 @@ template <typename Flavor> void ProverInstance_<Flavor>::allocate_selectors(cons
         selector = Polynomial(block.size(), dyadic_size(), block.trace_offset());
     }
 
-    // Set the other non-gate selector polynomials (e.g. q_l, q_r, q_m etc.) to active trace size
-    for (auto& selector : polynomials.get_non_gate_selectors()) {
-        selector = Polynomial(trace_active_range_size(), dyadic_size());
+    auto non_gate_selectors = polynomials.get_non_gate_selectors();
+    if (!consumed_circuit) {
+        // Set the other non-gate selector polynomials (e.g. q_l, q_r, q_m etc.) to active trace size
+        for (auto& selector : non_gate_selectors) {
+            selector = Polynomial(trace_active_range_size(), dyadic_size());
+        }
+        return;
+    }
+
+    // In one-shot proving the builder is consumed, so allocate wide selectors directly to their nonzero support.
+    // Trace population writes through set_if_valid_index(), preserving virtual zeros outside each backed span.
+    for (size_t selector_idx = 0; selector_idx < non_gate_selectors.size(); ++selector_idx) {
+        size_t first_nonzero = trace_active_range_size();
+        size_t last_nonzero = 0;
+        for (const auto& block : circuit.blocks.get()) {
+            const auto& source = block.non_gate_selectors[selector_idx];
+            const size_t block_size = block.size();
+            for (size_t row_idx = 0; row_idx < block_size; ++row_idx) {
+                if (!source[row_idx].is_zero()) {
+                    const size_t trace_idx = block.trace_offset() + row_idx;
+                    first_nonzero = std::min(first_nonzero, trace_idx);
+                    last_nonzero = trace_idx;
+                }
+            }
+        }
+
+        auto& selector = non_gate_selectors[selector_idx];
+        if (first_nonzero == trace_active_range_size()) {
+            selector = Polynomial(1, dyadic_size(), 0);
+        } else {
+            selector = Polynomial(last_nonzero + 1 - first_nonzero, dyadic_size(), first_nonzero);
+        }
     }
 }
 
